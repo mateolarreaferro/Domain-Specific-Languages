@@ -1,0 +1,6 @@
+
+let x = [1, 2];
+let y = [1, 2, 3];
+
+# result: TypeError
+print(x + y);

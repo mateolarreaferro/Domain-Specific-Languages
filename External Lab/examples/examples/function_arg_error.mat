@@ -1,0 +1,7 @@
+
+def foo(x: Mat(1, 1)) {
+    print(x);
+}
+foo(5);
+# result: Error, undefined variable x
+print(x); 

@@ -1,0 +1,6 @@
+
+name = ~r"[a-zA-Z][-\w]*" ws
+number = ~r"[0-9]+" ws
+
+emptyline = ws+
+ws = ~r"\s*"

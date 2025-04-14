@@ -1,0 +1,8 @@
+
+
+def add_multiply(x: Mat(a, a), y: Mat(a, a)) -> Mat(a, a) {
+    return x * x + y;
+}
+
+# correct: [[8, 12], [18, 26]]
+print(add_multiply([[1, 2], [3, 4]], [[1,2], [3,4]]));
