@@ -1,0 +1,10 @@
+x = turtle[10];
+
+ask x {
+    color = "red";
+}
+
+ontick x {
+    forward(20);
+    right(random(20));
+}

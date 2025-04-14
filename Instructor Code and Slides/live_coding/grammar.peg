@@ -1,0 +1,16 @@
+
+add_expr = (mul_expr add_op)* mul_expr
+mul_expr = (number mul_op)* number
+
+add_op = (add / sub) ws
+mul_op = (mul / div) ws
+
+number     = ~r"[0-9]+" ws
+add     = "+" 
+sub     = "-" 
+mul     = "*" 
+div     = "/" 
+
+ws          = ~r"\s*"
+eol         = ~r"$"
+emptyline   = ws+

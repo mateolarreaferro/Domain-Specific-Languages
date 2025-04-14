@@ -1,0 +1,41 @@
+program = (statement / ask_block / ontick_block / emptyline)*
+
+ask_block = ask name open_brace statement* close_brace
+ontick_block = ontick name open_brace statement* close_brace
+
+statement = (binding / expr) semicolon
+
+binding = name equals expr
+
+expr = add_expr / unary_expr
+unary_expr = function_call / array / literal / variable
+
+function_call = name lparen arg_list? rparen
+arg_list = (expr comma)* expr
+
+add_expr    = (mul_expr add_op)* mul_expr
+mul_expr    = (unary_expr mul_op)* unary_expr
+add_op = ("+" / "-") ws
+mul_op = ("*" / "/")  ws
+
+array = literal "[" number "]"
+literal = turtle / string / number
+
+variable = name ws
+
+ask = "ask" ws
+ontick = "ontick" ws
+turtle = "turtle" ws
+lparen = "(" ws
+rparen = ")" ws
+comma = "," ws
+semicolon = ";" ws
+equals = "=" ws
+open_brace = "{" ws
+close_brace = "}" ws
+string = "\"" ~r"[^\"]+" "\"" ws
+name = ~r"[a-zA-Z]\w*" ws
+number = ~r"-?[0-9]+" ws
+
+emptyline = ws+
+ws = ~r"\s*"
