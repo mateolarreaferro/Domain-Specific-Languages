@@ -1,6 +1,119 @@
+# Lexical Elements --> smallest units (tokens)
+ws          = ~r"\s*"              # matches zero or more whitespace characters
+emptyline   = ws+                 # matches one or more whitespace characters — useful for blank lines
+name        = ~r"[a-zA-Z][-\w]*" ws  # matches a valid identifier (e.g., variable or function name); must start with a letter, then letters, digits, underscores, or hyphens; consumes trailing whitespace
+number      = ~r"[0-9]+" ws        # matches one or more digits (an integer literal), with trailing whitespace
 
-name = ~r"[a-zA-Z][-\w]*" ws
-number = ~r"[0-9]+" ws
+# ------------------------------------------------------------------
+# Requirement: Section 1.1 Comments
+# Comments: Text following a '#' on the same line is ignored.
+# ------------------------------------------------------------------
+comment     = "#" ~r".*" ws        # matches a comment: begins with '#' followed by any characters until the end of the line, then trailing whitespace
 
-emptyline = ws+
-ws = ~r"\s*"
+# ------------------------------------------------------------------
+# Program Structure
+# Requirement: The program consists of statements and function definitions, with extra lines/comments allowed.
+# ------------------------------------------------------------------
+program     = (statement / comment / emptyline)*  
+    # a program consists of zero or more statements, comments, or empty lines
+
+# ------------------------------------------------------------------
+# Statements (Requirement: Section 1.3)
+# Every statement ends with a semicolon. They include variable bindings and expression statements.
+# ------------------------------------------------------------------
+statement   = let_stmt / expr_stmt / func_def  
+    # a statement may be:
+    #   - a variable binding (let statement),
+    #   - an expression statement, or
+    #   - a function definition
+
+# Variable Binding (let statements) (Requirement: Section 1.3.2)
+let_stmt    = "let" ws name ws "=" ws expr ";" ws  
+    # a let statement binds an expression to a variable:
+    #   - the keyword "let" followed by a variable name,
+    #   - an '=' sign, then an expression,
+    #   - and ends with a semicolon.
+
+# Expression Statement (Requirement: Section 1.3.1)
+expr_stmt   = expr ";" ws  
+    # an expression statement is any expression immediately followed by a semicolon
+
+# ------------------------------------------------------------------
+# Function Definitions (Requirement: Section 1.4)
+# Functions must include type annotations for both parameters and return values.
+# ------------------------------------------------------------------
+func_def    = "def" ws name ws "(" ws params? ")" ws "->" ws type ws "{" ws func_body "}" ws  
+    # a function definition starts with "def" followed by:
+    #   - a function name,
+    #   - a parameter list (params? means it can be empty) enclosed in parentheses,
+    #   - the "->" symbol and a return type,
+    #   - and a function body enclosed in braces { }.
+
+params      = param ("," ws param)*  
+    # parameters are one or more values separated by commas
+
+param       = name ws ":" ws type  
+    # each parameter consists of a name, a colon, and a type annotation
+
+type        = "Mat(" ws number ws "," ws number ws ")" ws  
+    # the type annotation for matrices follows the form Mat(rows, columns)
+    # Requirement: Section 1.6 (Types) – all values are integer matrices, using Mat(r, c)
+
+func_body   = (statement)* return_stmt?  
+    # the function body is a series of statements, with an optional return statement at the end
+
+return_stmt = "return" ws expr ";" ws  
+    # a return statement starts with "return", followed by an expression, and ends with a semicolon
+
+# ------------------------------------------------------------------
+# Expressions (Requirement: Section 1.2)
+# Must support integer, vector, and matrix literals, as well as arithmetic operations.
+# ------------------------------------------------------------------
+expr        = add  
+    # top-level expression rule, starting at addition/subtraction
+
+# Arithmetic - Addition/Subtraction (Requirement: Section 1.2.2)
+add = mul (("+" / "-") ws mul)*  
+    # addition and subtraction are left-associative:
+    #   begins with a multiplication expression and may be followed by one or more '+' or '-' operators
+    #   with multiplication binding tighter than addition/subtraction
+
+# Arithmetic - Multiplication (Requirement: Section 1.2.2)
+mul = atom (("*") ws atom)*  
+    # multiplication (denoted by '*', used for matrix multiplication) binds tighter than addition
+
+# ------------------------------------------------------------------
+# Atoms and Literals (Requirement: Section 1.2.1, Literals)
+# Must support integer, vector, and matrix literals, as well as variables and function calls.
+# ------------------------------------------------------------------
+atom        = matrix / vector / number_literal / func_call / var  
+    # an atom is the simplest expression element:
+    #   it can be a matrix literal, a vector literal, a numeric literal,
+    #   a function call, or a variable
+
+var         = name  
+    # a variable is simply represented by its name
+
+number_literal = number  
+    # a number literal is defined using the 'number' token
+
+# Function Calls (Requirement: Section 1.2.3)
+func_call   = name ws "(" ws arguments? ")" ws  
+    # a function call consists of a function name followed by parentheses,
+    #   optionally containing a comma-separated list of arguments
+
+arguments   = expr ("," ws expr)*  
+    # arguments are one or more expressions separated by commas
+
+# ------------------------------------------------------------------
+# Matrix and Vector Literals (Requirement: Section 1.2.1)
+# MatLang supports matrix and vector literals.
+# Note: Expressions inside matrix literals are not supported – this can be enforced in later stages.
+# ------------------------------------------------------------------
+matrix      = "[" ws vector ("," ws vector)* "]" ws  
+    # a matrix literal is defined as a list of vector literals (representing rows) inside square brackets;
+    # rows are separated by commas
+
+vector      = "[" ws expr ("," ws expr)* "]" ws  
+    # a vector literal is defined as a list of expressions (typically numbers) inside square brackets;
+    # elements are separated by commas
