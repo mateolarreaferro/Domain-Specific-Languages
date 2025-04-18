@@ -6,6 +6,16 @@ from AST import *                              # Import AST classes (Block, Let,
 from typ import *                              # Import type-checking utilities (if needed)
 import sys                                     # Provides command-line argument support
 
+from AST import Expr   # local import to avoid circularity
+def _first_expr(obj):
+    """Return the first Expr inside obj, unwrapping one‑element lists."""
+    if isinstance(obj, Expr):
+        return obj
+    if isinstance(obj, list) and obj:
+        return _first_expr(obj[0])
+    return obj
+
+
 
 class MatrixVisitor(NodeVisitor):
     """Visitor for the parse tree that converts a MatLang parse tree (as defined in grammar.peg)
@@ -16,6 +26,11 @@ class MatrixVisitor(NodeVisitor):
         # Default method that returns the visited children if present,
         # or the node text otherwise.
         return visited_children or node.text
+    
+    def visit_name(self, node, visited_children):
+        # strip trailing ws and return plain string
+        return node.text.strip()
+
 
     # ----------------------------------------------------------------
     # Program
@@ -161,7 +176,7 @@ class MatrixVisitor(NodeVisitor):
         left = visited_children[0]
         for group in visited_children[1]:
             op_token = group[0][0] if isinstance(group[0], list) else group[0]
-            right = group[2]
+            right = _first_expr(group[2])
             if op_token == "+":
                 op_enum = BinOp.PLUS
             elif op_token == "-":
@@ -179,7 +194,7 @@ class MatrixVisitor(NodeVisitor):
         left = visited_children[0]
         for group in visited_children[1]:
             op_token = group[0][0] if isinstance(group[0], list) else group[0]
-            right = group[2]
+            right = _first_expr(group[2])
             if op_token == "*":
                 op_enum = BinOp.TIMES
             else:
@@ -199,8 +214,8 @@ class MatrixVisitor(NodeVisitor):
     # var = name
     # ----------------------------------------------------------------
     def visit_var(self, node, visited_children):
-        var_name = visited_children[0]
-        return Variable(var_name)
+        return Variable(visited_children[0])   # return a Variable Expr, not the string
+
     
     def visit_number(self, node, visited_children):
     # number is the TOKEN rule ~r"[0-9]+"
@@ -220,19 +235,29 @@ class MatrixVisitor(NodeVisitor):
     # func_call = name ws "(" ws arguments? ")" ws
     # ----------------------------------------------------------------
     def visit_func_call(self, node, visited_children):
-        func_name = visited_children[0]
-        args = visited_children[4] if visited_children[4] != [] else []
+        func_name = visited_children[0]          # already a string via visit_name
+        raw_args  = visited_children[4] if visited_children[4] else []
+        # flatten any stray lists
+        args = []
+        for a in raw_args:
+            if isinstance(a, list):
+                args.extend([x for x in a if isinstance(x, Expr)])
+            else:
+                args.append(a)
         return FunctionCall(func_name, args)
+
 
     # ----------------------------------------------------------------
     # Arguments:
     # arguments = expr ("," ws expr)*
     # ----------------------------------------------------------------
     def visit_arguments(self, node, visited_children):
-        arg_list = [visited_children[0]]
-        for group in visited_children[1]:
-            arg_list.append(group[2])
-        return arg_list
+        first = visited_children[0]                 # the first expression
+        rest  = [g[2] for g in visited_children[1]] # remaining expressions
+
+        raw_args = [first] + rest                   # list may contain Expr or [Expr]
+        args = [_first_expr(a) for a in raw_args]   # flatten each entry to a real Expr
+        return args
 
     # ----------------------------------------------------------------
     # Matrix Literal:
@@ -258,13 +283,10 @@ class MatrixVisitor(NodeVisitor):
     # vector = "[" ws expr ("," ws expr)* "]" ws
     # ----------------------------------------------------------------
     def visit_vector(self, node, visited_children):
-        first_expr  = visited_children[2]
-        rest_exprs  = [g[2] for g in visited_children[3]]
-        exprs       = [first_expr] + rest_exprs
+        first_expr = visited_children[2]
+        rest_exprs = [g[2] for g in visited_children[3]]
+        return VectorLiteral([first_expr] + rest_exprs)
 
-    
-        elements = [e for e in exprs if isinstance(e, Expr)]
-        return VectorLiteral(elements)
 
 
 
