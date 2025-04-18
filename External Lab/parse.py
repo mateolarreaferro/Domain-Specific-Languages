@@ -6,6 +6,19 @@ from AST import *                              # Import AST classes (Block, Let,
 from typ import *                              # Import type-checking utilities (if needed)
 import sys                                     # Provides command-line argument support
 
+# ────────────────────────────────────────────────────────────────────────────
+# Helper: always yield an Expr
+# ────────────────────────────────────────────────────────────────────────────
+def _expr(item):
+    """Return an Expr; wrap bare identifier strings as Variable."""
+    if isinstance(item, Expr):
+        return item
+    if isinstance(item, str):
+        return Variable(item)
+    if isinstance(item, list) and item:
+        return _expr(item[0])
+    return item
+
 from AST import Expr   # local import to avoid circularity
 def _first_expr(obj):
     """Return the first Expr inside obj, unwrapping one‑element lists."""
@@ -30,6 +43,18 @@ class MatrixVisitor(NodeVisitor):
     def visit_name(self, node, visited_children):
         # strip trailing ws and return plain string
         return node.text.strip()
+    
+    # --- Helper -------------------------------------------------------
+    def _expr(item):
+        """Return the first Expr or transform bare strings → Variable."""
+        if isinstance(item, Expr):
+            return item
+        if isinstance(item, str):        # lone identifier
+            return Variable(item)
+        if isinstance(item, list) and item:
+            return _expr(item[0])
+        return item
+
 
 
     # ----------------------------------------------------------------
@@ -72,21 +97,24 @@ class MatrixVisitor(NodeVisitor):
     # Function Definition:
     # func_def = "def" ws name ws "(" ws params? ")" ws "->" ws type ws "{" ws func_body "}" ws
     # ----------------------------------------------------------------
-    def visit_func_def(self, node, visited_children):
-        func_name = visited_children[2]
+    def visit_func_def(self, node, ch):
+        name  = ch[2]
+        raw_params = ch[6]                # [] or param list
+        params = [p for p in raw_params if isinstance(p, tuple)]
+        param_names = [n for n, _ in params]
+        param_types = [t for _, t in params]
 
-        raw_params = visited_children[6]
-        # raw_params is either [] or a list that may contain stray whitespace nodes.
-        params = [p for p in raw_params if isinstance(p, tuple) and len(p) == 2]
+        if isinstance(ch[9], str) and ch[9] == '->':   # arrow present
+            ret_ty   = ch[11]
+            body_idx = 15
+        else:                                          # no arrow
+            ret_ty   = MatrixType((ConcreteDim(0), ConcreteDim(0)))  # default Mat(0,0)
+            body_idx = 11
 
-        param_names = [p[0] for p in params]
-        param_types = [p[1] for p in params]
+        body = ch[body_idx]
+        return FunctionDec(name, param_names, body,
+                       FunctionType(param_types, ret_ty))
 
-        return_type = visited_children[10]
-        func_body   = visited_children[14]
-
-        func_type = FunctionType(param_types, return_type)
-        return FunctionDec(func_name, param_names, func_body, func_type)
 
 
 
@@ -176,7 +204,7 @@ class MatrixVisitor(NodeVisitor):
         left = visited_children[0]
         for group in visited_children[1]:
             op_token = group[0][0] if isinstance(group[0], list) else group[0]
-            right = _first_expr(group[2])
+            right = _expr(group[2])
             if op_token == "+":
                 op_enum = BinOp.PLUS
             elif op_token == "-":
@@ -194,7 +222,7 @@ class MatrixVisitor(NodeVisitor):
         left = visited_children[0]
         for group in visited_children[1]:
             op_token = group[0][0] if isinstance(group[0], list) else group[0]
-            right = _first_expr(group[2])
+            right = _expr(group[2])
             if op_token == "*":
                 op_enum = BinOp.TIMES
             else:
@@ -207,7 +235,7 @@ class MatrixVisitor(NodeVisitor):
     # atom = matrix / vector / number_literal / func_call / var
     # ----------------------------------------------------------------
     def visit_atom(self, node, visited_children):
-        return visited_children[0]
+        return _expr(visited_children[0])
 
     # ----------------------------------------------------------------
     # Variable:
@@ -296,9 +324,11 @@ class MatrixVisitor(NodeVisitor):
     # Print Statement:
     # print_stmt = "print" ws "(" ws expr ws ")" ws ";" ws
     # ----------------------------------------------------------------
-    def visit_print_stmt(self, node, visited_children):
-        expr_node = visited_children[4]
-        return Print(expr_node)
+    def visit_print_stmt(self, node, ch):
+        first = ch[4]                     # expr
+        rest  = [g[2] for g in ch[5]]     # , expr …
+        return Print([_expr(first)] + [_expr(r) for r in rest])
+
 
 # ----------------------------------------------------------------
 # parse() function: Reads a file, parses it using the grammar, and returns an AST.

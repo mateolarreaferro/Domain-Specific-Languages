@@ -101,10 +101,9 @@ class Literal(Expr):
 # ----------------------------------------------------------------
 @dataclass
 class Print(Statement):
-    expr: Expr
-
+    args: list[Expr]
     def __eq__(self, other):
-        return type(self) is type(other) and self.expr == other.expr
+        return type(self) is type(other) and self.args == other.args
 
 
 # ----------------------------------------------------------------
@@ -167,9 +166,16 @@ class Return(Statement):
 # Interpreter Functions
 # ----------------------------------------------------------------
 
+def _to_matrix(val):
+    """Accept int | np.ndarray and return a 2‑D numpy array."""
+    if isinstance(val, np.ndarray):
+        return val
+    return np.array([[val]])
+
+
 def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
     if isinstance(expr, Literal):
-        return np.array([[expr.value]])
+        return _to_matrix(expr.value)
     elif isinstance(expr, Variable):
         if expr.name not in bindings:
             raise Exception(f"Undefined variable: {expr.name}")
@@ -201,35 +207,57 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
             new_bindings[param_name] = arg_val
         return interpret_block(func_dec.body, new_bindings, declarations)
     elif isinstance(expr, VectorLiteral):
-        row = [interpret_expr(e, bindings, declarations)[0][0] for e in expr.elements]
-        return np.array([row])
+        elems = [interpret_expr(e, bindings, declarations) for e in expr.elements]
+        flat  = [int(v) if v.size == 1 else v.item() for v in elems]
+        return np.array([flat])
     else:
         raise Exception("Unrecognized expression type: " + str(type(expr)))
 
-def interpret_stmt(stmt, bindings, declarations):
+def interpret_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDict):
+    # 1. let
     if isinstance(stmt, Let):
-        val = interpret_expr(stmt.expr, bindings, declarations)
-        return (val, False)
-    elif isinstance(stmt, Return):
-        val = interpret_expr(stmt.expr, bindings, declarations)
-        return (val, True)
-    elif isinstance(stmt, FunctionDec):
-        declarations[stmt.name] = stmt
-        return (None, False)
-    elif isinstance(stmt, Expr):
-        val = interpret_expr(stmt, bindings, declarations)
-        return (val, False)
-    elif isinstance(stmt, Print):
-        val = interpret_expr(stmt.expr, bindings, declarations)
-        print(val)
-        return (np.empty((0, 0)), False)  # Mat(0, 0)
+        val = interpret_expr(stmt.value, bindings, declarations)
+        bindings[stmt.name] = val
+        return val, False
 
-    else:
-        raise Exception("Unknown statement type: " + str(type(stmt)))
+    # 2. return
+    if isinstance(stmt, Return):
+        val = interpret_expr(stmt.expr, bindings, declarations)
+        return val, True
+
+    # 3. function declaration
+    if isinstance(stmt, FunctionDec):
+        declarations[stmt.name] = stmt
+        return None, False
+
+    # 4. print (built‑in)
+    if isinstance(stmt, Print):
+        for arg in stmt.args:
+            val = interpret_expr(arg, bindings, declarations)
+            print(val, end=" ")
+        print()
+        return np.empty((0, 0)), False   # Mat(0,0)
+
+    # 5. naked expression statement
+    if isinstance(stmt, ExpressionStatement):
+        interpret_expr(stmt.expr, bindings, declarations)
+        return np.empty((0, 0)), False
+
+    # 6. any expression used directly as a stmt (rare)
+    if isinstance(stmt, Expr):
+        interpret_expr(stmt, bindings, declarations)
+        return np.empty((0, 0)), False
+
+    raise Exception(f"Unknown statement type: {type(stmt)}")
+
 
 def interpret_block(block: Block, bindings: ScopedDict, declarations: ScopedDict):
+    result = np.empty((0, 0))          # Mat(0,0) default
     for stmt in block.stmts:
         val, is_ret = interpret_stmt(stmt, bindings, declarations)
         if is_ret:
             return val
-    return np.array([[]])
+        if val is not None:
+            result = val
+    return result
+

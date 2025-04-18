@@ -188,14 +188,48 @@ def type_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDict):
       TypeError if the statement is ill-typed.
     """
     if isinstance(stmt, Let):
-        expr_type = type_expr(stmt.value, bindings, declarations)
-        bindings[stmt.name] = expr_type
+        t = type_expr(stmt.value, bindings, declarations)
+        bindings[stmt.name] = t
     elif isinstance(stmt, Return):
         type_expr(stmt.expr, bindings, declarations)
     elif isinstance(stmt, FunctionDec):
-        ...
-    elif isinstance(stmt, Print): 
-        type_expr(stmt.expr, bindings, declarations)
+        # 1.  Register the function so later calls see its type
+        declarations[stmt.name] = stmt
+
+    # 2.  Prepare an inner scope holding the parameter bindings
+        inner_bindings = ScopedDict(bindings)
+        for p_name, p_type in zip(stmt.params, stmt.ty.params):
+            inner_bindings[p_name] = p_type
+
+    # 3.  Type‑check the body
+    #     Track every explicit return so we can verify its type.
+        observed_return_types = []
+
+        for s in stmt.body.stmts:
+            if isinstance(s, Return):
+                observed_return_types.append(type_expr(s.expr, inner_bindings, declarations))
+            else:
+                type_stmt(s, inner_bindings, declarations)
+
+    # 4.  If the function has explicit returns, make sure each matches the declared type
+        if observed_return_types:
+            for rt in observed_return_types:
+                if rt != stmt.ty.ret:
+                    raise TypeError(
+                        f"Return type mismatch in function '{stmt.name}': "
+                        f"expected {stmt.ty.ret} but got {rt}"
+                    )
+    # 5.  If there is **no** return statement, spec says it returns Mat(0,0)
+        else:
+            implicit = MatrixType((ConcreteDim(0), ConcreteDim(0)))
+            if implicit != stmt.ty.ret:
+                raise TypeError(
+                    f"Function '{stmt.name}' is missing a return; "
+                    f"declared return type was {stmt.ty.ret}"
+                )
+    elif isinstance(stmt, Print):
+        for arg in stmt.args:
+            type_expr(arg, bindings, declarations)
     elif isinstance(stmt, ExpressionStatement): 
         type_expr(stmt.expr, bindings, declarations)
     elif isinstance(stmt, Expr):
