@@ -206,7 +206,7 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
     else:
         raise Exception("Unrecognized expression type: " + str(type(expr)))
 
-def interpret_stmt(stmt, ExpressionStatement):
+def interpret_stmt(stmt, bindings, declarations):
     if isinstance(stmt, Let):
         val = interpret_expr(stmt.expr, bindings, declarations)
         return (val, False)

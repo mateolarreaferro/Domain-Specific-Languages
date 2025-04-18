@@ -21,15 +21,18 @@ class MatrixVisitor(NodeVisitor):
     # Program
     # ----------------------------------------------------------------
     def visit_program(self, node, visited_children):
-        statements = []
-        for child in visited_children:
-            if isinstance(child, list):
-                for sub in child:
-                    if isinstance(sub, Statement):
-                        statements.append(sub)
-            elif isinstance(child, Statement):
-                statements.append(child)
+        def flatten_statements(children):
+            result = []
+            for child in children:
+                if isinstance(child, list):
+                    result.extend(flatten_statements(child))
+                elif isinstance(child, Statement):
+                    result.append(child)
+            return result
+
+        statements = flatten_statements(visited_children)
         return Block(statements)
+
 
 
     # ----------------------------------------------------------------
@@ -56,11 +59,21 @@ class MatrixVisitor(NodeVisitor):
     # ----------------------------------------------------------------
     def visit_func_def(self, node, visited_children):
         func_name = visited_children[2]
-        params = visited_children[6] if visited_children[6] != [] else []
-        return_type = visited_children[10]
-        func_body = visited_children[14]
+
+        raw_params = visited_children[6]
+        # raw_params is either [] or a list that may contain stray whitespace nodes.
+        params = [p for p in raw_params if isinstance(p, tuple) and len(p) == 2]
+
         param_names = [p[0] for p in params]
-        return FunctionDec(func_name, param_names, func_body, return_type)
+        param_types = [p[1] for p in params]
+
+        return_type = visited_children[10]
+        func_body   = visited_children[14]
+
+        func_type = FunctionType(param_types, return_type)
+        return FunctionDec(func_name, param_names, func_body, func_type)
+
+
 
     # ----------------------------------------------------------------
     # Parameters List:
@@ -78,8 +91,11 @@ class MatrixVisitor(NodeVisitor):
     # ----------------------------------------------------------------
     def visit_param(self, node, visited_children):
         param_name = visited_children[0]
+        if isinstance(param_name, list):  # unpack if needed
+            param_name = param_name[0]
         param_type = visited_children[4]
         return (param_name, param_type)
+
 
     # ----------------------------------------------------------------
     # Type:
@@ -185,14 +201,19 @@ class MatrixVisitor(NodeVisitor):
     def visit_var(self, node, visited_children):
         var_name = visited_children[0]
         return Variable(var_name)
+    
+    def visit_number(self, node, visited_children):
+    # number is the TOKEN rule ~r"[0-9]+"
+        return Literal(int(node.text))
+
 
     # ----------------------------------------------------------------
     # Number Literal:
     # number_literal = number
     # ----------------------------------------------------------------
     def visit_number_literal(self, node, visited_children):
-        number_text = visited_children[0]
-        return Literal(int(number_text))
+        return Literal(int(node.text.strip()))
+
 
     # ----------------------------------------------------------------
     # Function Call:
@@ -218,22 +239,36 @@ class MatrixVisitor(NodeVisitor):
     # matrix = "[" ws vector ("," ws vector)* "]" ws
     # ----------------------------------------------------------------
     def visit_matrix(self, node, visited_children):
-        first_vector = visited_children[2]
-        vectors = [first_vector]
-        for group in visited_children[3]:
-            vectors.append(group[2])
-        return MatrixLiteral(values=vectors)
+        first_vec   = visited_children[2]
+        rest_vecs   = [g[2] for g in visited_children[3]]
+        vectors     = [first_vec] + rest_vecs
+
+    # Expect each row to be a VectorLiteral; store its element list
+        row_lists = []
+        for v in vectors:
+            if isinstance(v, VectorLiteral):
+                row_lists.append(v.elements)
+            else:
+                raise Exception(f"Invalid matrix row: {v}")
+        return MatrixLiteral(row_lists)
+
 
     # ----------------------------------------------------------------
     # Vector Literal:
     # vector = "[" ws expr ("," ws expr)* "]" ws
     # ----------------------------------------------------------------
     def visit_vector(self, node, visited_children):
-        first_expr = visited_children[2]
-        elements = [first_expr]
-        for group in visited_children[3]:
-            elements.append(group[2])
+        first_expr  = visited_children[2]
+        rest_exprs  = [g[2] for g in visited_children[3]]
+        exprs       = [first_expr] + rest_exprs
+
+    
+        elements = [e for e in exprs if isinstance(e, Expr)]
         return VectorLiteral(elements)
+
+
+
+
     
     # ----------------------------------------------------------------
     # Print Statement:

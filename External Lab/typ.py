@@ -187,31 +187,17 @@ def type_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDict):
     Raises:
       TypeError if the statement is ill-typed.
     """
-    # A let statement: type-check the expression and add the variable's type into bindings.
     if isinstance(stmt, Let):
         expr_type = type_expr(stmt.value, bindings, declarations)
         bindings[stmt.name] = expr_type
-    # A return statement: type-check the expression being returned.
     elif isinstance(stmt, Return):
-        # We simply type-check the return expression;
-        # the caller (e.g., type_stmt in a function body) should verify that the return type matches.
         type_expr(stmt.expr, bindings, declarations)
-    # A function declaration: type-check the function body using a new scope.
     elif isinstance(stmt, FunctionDec):
-        # Create a new binding environment for the function's scope.
-        local_bindings = ScopedDict(bindings)
-        # The declared function type (stmt.ty) contains parameter types.
-        if len(stmt.params) != len(stmt.ty.params):
-            raise TypeError("Parameter count mismatch in function declaration.")
-        # Bind each parameter name to its declared type.
-        for pname, ptype in zip(stmt.params, stmt.ty.params):
-            local_bindings[pname] = ptype
-        # Type-check the function body.
-        # (If the function body returns a value, type checking of that return is done in type_expr for a Return node.)
-        type_block(stmt.body, local_bindings, declarations)
-        # Add the function declaration to the declarations dictionary.
-        declarations[stmt.name] = stmt
-    # An expression statement: simply type-check the expression.
+        ...
+    elif isinstance(stmt, Print): 
+        type_expr(stmt.expr, bindings, declarations)
+    elif isinstance(stmt, ExpressionStatement): 
+        type_expr(stmt.expr, bindings, declarations)
     elif isinstance(stmt, Expr):
         type_expr(stmt, bindings, declarations)
     else:
