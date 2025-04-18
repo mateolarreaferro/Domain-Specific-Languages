@@ -62,6 +62,15 @@ class FunctionType(Type):
         return (type(self) is type(other)
                 and self.params == other.params
                 and self.ret == other.ret)
+    
+
+@dataclass
+class TypeVarDim(Dim):
+    name: str
+
+    def __eq__(self, other):
+        return type(self) is type(other) and self.name == other.name
+
 
 # ----------------------------------------------------------------
 # Type-checking for expressions
@@ -90,6 +99,13 @@ def type_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         if expr.name not in bindings:
             raise TypeError(f"Undefined variable: {expr.name}")
         return bindings[expr.name]
+    elif isinstance(expr, VectorLiteral):
+        for e in expr.elements:
+            etype = type_expr(e, bindings, declarations)
+            if not isinstance(etype, MatrixType) or etype.shape != (ConcreteDim(1), ConcreteDim(1)):
+                raise TypeError("Vector elements must be Mat(1,1)")
+        return MatrixType((ConcreteDim(1), ConcreteDim(len(expr.elements))))
+
     
     # If the expression is a binary expression, type-check both operands.
     elif isinstance(expr, BinaryExpr):

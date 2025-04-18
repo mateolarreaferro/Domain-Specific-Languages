@@ -24,6 +24,13 @@ class Expr(Statement):
     """Base class for all expressions in the AST."""
     pass
 
+@dataclass
+class ExpressionStatement(Statement):
+    expr: Expr
+    def __eq__(self, other):
+        return type(self) is type(other) and self.expr == other.expr
+
+
 # ----------------------------------------------------------------
 # AST Class: Block
 # ----------------------------------------------------------------
@@ -193,13 +200,15 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         for param_name, arg_val in zip(func_dec.params, arg_values):
             new_bindings[param_name] = arg_val
         return interpret_block(func_dec.body, new_bindings, declarations)
+    elif isinstance(expr, VectorLiteral):
+        row = [interpret_expr(e, bindings, declarations)[0][0] for e in expr.elements]
+        return np.array([row])
     else:
         raise Exception("Unrecognized expression type: " + str(type(expr)))
 
-def interpret_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDict):
+def interpret_stmt(stmt, ExpressionStatement):
     if isinstance(stmt, Let):
-        val = interpret_expr(stmt.value, bindings, declarations)
-        bindings[stmt.name] = val
+        val = interpret_expr(stmt.expr, bindings, declarations)
         return (val, False)
     elif isinstance(stmt, Return):
         val = interpret_expr(stmt.expr, bindings, declarations)
@@ -213,7 +222,8 @@ def interpret_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDi
     elif isinstance(stmt, Print):
         val = interpret_expr(stmt.expr, bindings, declarations)
         print(val)
-        return (val, False)
+        return (np.empty((0, 0)), False)  # Mat(0, 0)
+
     else:
         raise Exception("Unknown statement type: " + str(type(stmt)))
 

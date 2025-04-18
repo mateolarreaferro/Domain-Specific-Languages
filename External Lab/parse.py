@@ -25,12 +25,12 @@ class MatrixVisitor(NodeVisitor):
         for child in visited_children:
             if isinstance(child, list):
                 for sub in child:
-                    if hasattr(sub, 'node_type') or isinstance(sub, Statement):
+                    if isinstance(sub, Statement):
                         statements.append(sub)
-            else:
-                if hasattr(child, 'node_type') or isinstance(child, Statement):
-                    statements.append(child)
+            elif isinstance(child, Statement):
+                statements.append(child)
         return Block(statements)
+
 
     # ----------------------------------------------------------------
     # Let Statement: let_stmt = "let" ws name ws "=" ws expr ";" ws
@@ -47,7 +47,8 @@ class MatrixVisitor(NodeVisitor):
     # ----------------------------------------------------------------
     def visit_expr_stmt(self, node, visited_children):
         expr_node = visited_children[0]
-        return expr_node
+        return ExpressionStatement(expr_node)
+
 
     # ----------------------------------------------------------------
     # Function Definition:
@@ -85,9 +86,26 @@ class MatrixVisitor(NodeVisitor):
     # type = "Mat(" ws number ws "," ws number ws ")" ws
     # ----------------------------------------------------------------
     def visit_type(self, node, visited_children):
-        rows = int(visited_children[2])
-        cols = int(visited_children[6])
-        return MatrixType(rows, cols)
+        def extract_dim(val):
+            if isinstance(val, list):
+                return extract_dim(val[0])
+            if isinstance(val, int):
+                return ConcreteDim(val)
+            if isinstance(val, str):
+                return TypeVarDim(val) if val.isalpha() else ConcreteDim(int(val))
+            return TypeVarDim(str(val))
+
+        rows = extract_dim(visited_children[2])
+        cols = extract_dim(visited_children[6])
+        return MatrixType((rows, cols))
+
+    
+    def visit_comment(self, node, visited_children):
+        return None
+
+    def visit_emptyline(self, node, visited_children):
+        return None
+
 
     # ----------------------------------------------------------------
     # Function Body:
