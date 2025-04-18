@@ -1,3 +1,9 @@
+# Program Structure
+# Requirement: The program consists of statements and function definitions, with extra lines/comments allowed.
+# ------------------------------------------------------------------
+program     = (statement / comment / emptyline)*  
+    # a program consists of zero or more statements, comments, or empty lines
+    
 # Lexical Elements --> smallest units (tokens)
 ws          = ~r"\s*"              # matches zero or more whitespace characters
 emptyline   = ws+                 # matches one or more whitespace characters — useful for blank lines
@@ -11,21 +17,16 @@ number      = ~r"[0-9]+" ws        # matches one or more digits (an integer lite
 comment     = "#" ~r".*" ws        # matches a comment: begins with '#' followed by any characters until the end of the line, then trailing whitespace
 
 # ------------------------------------------------------------------
-# Program Structure
-# Requirement: The program consists of statements and function definitions, with extra lines/comments allowed.
-# ------------------------------------------------------------------
-program     = (statement / comment / emptyline)*  
-    # a program consists of zero or more statements, comments, or empty lines
-
-# ------------------------------------------------------------------
 # Statements (Requirement: Section 1.3)
 # Every statement ends with a semicolon. They include variable bindings and expression statements.
 # ------------------------------------------------------------------
-statement   = let_stmt / expr_stmt / func_def  
+statement = print_stmt / let_stmt / expr_stmt / func_def
+
     # a statement may be:
     #   - a variable binding (let statement),
-    #   - an expression statement, or
-    #   - a function definition
+    #   - an expression statement,
+    #   - a function definition, or
+    #   - a print statement
 
 # Variable Binding (let statements) (Requirement: Section 1.3.2)
 let_stmt    = "let" ws name ws "=" ws expr ";" ws  
@@ -37,6 +38,10 @@ let_stmt    = "let" ws name ws "=" ws expr ";" ws
 # Expression Statement (Requirement: Section 1.3.1)
 expr_stmt   = expr ";" ws  
     # an expression statement is any expression immediately followed by a semicolon
+
+# Print Statement (custom addition)
+print_stmt  = "print" ws "(" ws expr ws ")" ws ";" ws
+    # a print statement starts with "print", followed by an expression in parentheses, then a semicolon
 
 # ------------------------------------------------------------------
 # Function Definitions (Requirement: Section 1.4)
