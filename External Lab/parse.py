@@ -1,13 +1,22 @@
 # parse.py
 
-from parsimonious.nodes import NodeVisitor  # Allows walking the parse tree.
-from parsimonious.nodes import Node         # Represents nodes in the parse tree.
-from parsimonious.grammar import Grammar    # Loads and works with the PEG grammar.
-from pathlib import Path                    # Helps read files (grammar and input).
-from AST import * # Import AST classes (Block, Let, etc.)
-from typ import * # Import type-checking utilities
-import sys                                  # Provides command-line argument support
-import re                                   # Regular expressions (if needed)
+from parsimonious.nodes import NodeVisitor
+from parsimonious.nodes import Node
+from parsimonious.grammar import Grammar
+from pathlib import Path
+import sys
+import re
+
+# --- Explicit Imports ---
+from AST import (
+    Statement, Expr, Block, BinaryExpr, Let, Literal, Variable,
+    MatrixLiteral, FunctionCall, FunctionDec, Return, BinOp
+)
+from typ import (
+    Type, Dim, ConcreteDim, TypeVarDim, MatrixType, FunctionType
+)
+# --- End Explicit Imports ---
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helper functions for expression handling
@@ -17,18 +26,15 @@ def _expr(item):
     if isinstance(item, Expr):
         return item
     if isinstance(item, str):
-        # Avoid wrapping operators if they somehow leak through
         if item in ['+', '-', '*']:
              return item
         return Variable(item)
-    # Handle lists potentially returned by visitor methods
     if isinstance(item, list) and item:
         if len(item) == 1:
-             # Recurse on the single item within the list
              return _expr(item[0])
     if isinstance(item, int):
         return Literal(item)
-    return item # Return item as is if none of the above match
+    return item
 
 def _first_expr(obj):
     """Return the first Expr inside obj, unwrapping one‑element lists."""
@@ -49,7 +55,6 @@ class MatrixVisitor(NodeVisitor):
     """
 
     def generic_visit(self, node, visited_children):
-        """Default visit method. Returns visited children or node text."""
         return visited_children or node.text
 
     def visit_name(self, node, visited_children):
@@ -84,7 +89,7 @@ class MatrixVisitor(NodeVisitor):
         return _expr(ch[0])
 
     # ----------------------------------------------------------------
-    # Function Definition (MODIFIED TO USE TUPLES FOR PARAMS)
+    # Function Definition
     # func_def = "def" ws name ws "(" ws params? ws ")" ws ("->" ws type)? ws "{" ws func_body "}" ws
     # ----------------------------------------------------------------
     def visit_func_def(self, node, visited_children):
@@ -96,11 +101,10 @@ class MatrixVisitor(NodeVisitor):
             if isinstance(potential_params, list) and all(isinstance(p, tuple) for p in potential_params):
                  param_info_list = potential_params
 
-        # Convert lists to tuples to match expected AST structure
-        param_names = tuple([name for name, type in param_info_list]) # Now a tuple
-        param_types = tuple([type for name, type in param_info_list]) # Now a tuple
+        param_names = tuple([name for name, type in param_info_list])
+        param_types = tuple([type for name, type in param_info_list])
 
-        return_type = MatrixType((ConcreteDim(0), ConcreteDim(0)))
+        return_type = MatrixType((ConcreteDim(0), ConcreteDim(0))) # Default type uses ConcreteDim
         return_type_group_result = visited_children[10]
 
         if isinstance(return_type_group_result, list) and len(return_type_group_result) == 1 and isinstance(return_type_group_result[0], list):
@@ -121,7 +125,6 @@ class MatrixVisitor(NodeVisitor):
         else:
              func_body = Block(stmts=[])
 
-        # Pass tuples to constructors
         func_type = FunctionType(params=param_types, ret=return_type)
         return FunctionDec(name=func_name, params=param_names, body=func_body, ty=func_type)
 
@@ -139,7 +142,7 @@ class MatrixVisitor(NodeVisitor):
                  raise Exception(f"visit_params: Expected tuple for subsequent param_result, got {type(param_result)}: {param_result}")
             rest_params.append(param_result)
         all_params = [first_param_result] + rest_params
-        return all_params # Returns list of tuples
+        return all_params
 
     # ----------------------------------------------------------------
     # Parameter: param = name ws ":" ws type
@@ -157,35 +160,37 @@ class MatrixVisitor(NodeVisitor):
 
     # ----------------------------------------------------------------
     # Type: type = "Mat(" ws dim ws "," ws dim ws ")" ws
+    # (MODIFIED TO STORE STRINGS FOR TYPE VARS IN SHAPE)
     # ----------------------------------------------------------------
     def visit_type(self, node, visited_children):
-        def extract_dim(val):
+        # This helper now returns ConcreteDim for numbers, and STRINGS for type vars
+        def extract_dim_for_pickle(val):
             val = _first_expr(val) # Unwrap potential lists
             if isinstance(val, int):
+                # Return ConcreteDim for numbers
                 return ConcreteDim(val)
             if isinstance(val, str):
                 if val.isalpha():
-                     if 'TypeVarDim' not in globals() and 'TypeVarDim' not in locals():
-                          # Attempt to import dynamically if needed (might indicate setup issue)
-                          try:
-                              from typ import TypeVarDim
-                          except ImportError:
-                              raise NameError("TypeVarDim class is not defined or imported")
-                     return TypeVarDim(val)
+                     # Return the string name directly for type variables
+                     return val
                 elif val.isdigit():
+                     # Handle numbers parsed as names (should ideally be parsed as number)
                      return ConcreteDim(int(val))
                 else:
                      raise ValueError(f"Invalid dimension value: {val}")
             raise TypeError(f"Unexpected type for dimension value: {type(val)}")
 
-        rows = extract_dim(visited_children[2])
-        cols = extract_dim(visited_children[6])
-        return MatrixType((rows, cols))
+        rows = extract_dim_for_pickle(visited_children[2]) # Result of visit_dim
+        cols = extract_dim_for_pickle(visited_children[6]) # Result of visit_dim
+
+        # Create MatrixType with shape containing ConcreteDim or str
+        return MatrixType(shape=(rows, cols))
 
     # ----------------------------------------------------------------
     # Dim: dim = name / number
     # ----------------------------------------------------------------
     def visit_dim(self, node, visited_children):
+        # Returns int from visit_number or str from visit_name
         return visited_children[0]
 
     # ----------------------------------------------------------------
@@ -236,7 +241,7 @@ class MatrixVisitor(NodeVisitor):
             if op_token == "+": op_enum = BinOp.PLUS
             elif op_token == "-": op_enum = BinOp.MINUS
             else: raise Exception(f"Unknown operator token in add: '{op_token}'")
-            left = _expr(left) # Ensure left is Expr node
+            left = _expr(left)
             left = BinaryExpr(left, right, op_enum)
         return left
 
@@ -258,7 +263,7 @@ class MatrixVisitor(NodeVisitor):
 
             if op_token == "*": op_enum = BinOp.TIMES
             else: raise Exception(f"Unknown operator token in mul: '{op_token}'")
-            left = _expr(left) # Ensure left is Expr node
+            left = _expr(left)
             left = BinaryExpr(left, right, op_enum)
         return left
 
@@ -326,6 +331,10 @@ class MatrixVisitor(NodeVisitor):
                 row_lists.append(v.values[0])
             else:
                 raise Exception(f"Invalid matrix row structure: Expected single-row MatrixLiteral, got {type(v)}: {repr(v)}")
+        # Ensure node_type matches if needed by __eq__ in AST.py
+        # Check your MatrixLiteral definition and its __eq__ method.
+        # If node_type is part of __eq__, include it here.
+        # Assuming it might be needed based on previous AST printouts:
         return MatrixLiteral(values=row_lists, node_type='MatrixLiteral')
 
 
@@ -336,6 +345,7 @@ class MatrixVisitor(NodeVisitor):
         first_expr = _expr(visited_children[2])
         rest_exprs = [_expr(g[2]) for g in visited_children[3]]
         elements = [first_expr] + rest_exprs
+        # Ensure node_type matches if needed by __eq__ in AST.py
         return MatrixLiteral(values=[elements], node_type='MatrixLiteral')
 
     # ----------------------------------------------------------------
@@ -391,13 +401,12 @@ if __name__ == "__main__":
     input_file = sys.argv[1]
     print(f"Parsing {input_file}...")
     try:
-        grammar = Grammar(Path("grammar.peg").read_text())
-        tree = grammar.parse(Path(input_file).read_text())
-        print("\n--- Parse Tree ---")
-        print(tree)
-        print("\n--- Visiting Tree to build AST ---")
-        visitor = MatrixVisitor()
-        ast = visitor.visit(tree)
+        # grammar = Grammar(Path("grammar.peg").read_text()) # Already read in parse()
+        # tree = grammar.parse(Path(input_file).read_text()) # Already done in parse()
+        # print("\n--- Parse Tree ---") # Printing tree can be very verbose
+        # print(tree)
+        print("\n--- Building AST ---")
+        ast = parse(input_file) # Call the parse function directly
         print("\n--- Generated AST ---")
         print(repr(ast))
         print("\nParsing and AST construction successful.")
