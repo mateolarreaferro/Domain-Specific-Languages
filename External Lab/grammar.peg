@@ -38,7 +38,7 @@ print_stmt  = "print" ws "(" ws expr ("," ws expr)* ws ")" ws ";" ws
 # ─────────────────────────────────────────────────────────────────────────────
 # Function definitions
 # ─────────────────────────────────────────────────────────────────────────────
-func_def    = "def" ws name ws "(" ws params? ")" ws ("->" ws type)? ws
+func_def    = "def" ws name ws "(" ws params? ws ")" ws ("->" ws type)? ws
               "{" ws func_body "}" ws
 
 params      = param ("," ws param)*
@@ -74,7 +74,7 @@ var             = name                         # handled as Variable in visitor
 number_literal  = number
 
 # Function calls
-func_call       = name ws "(" ws arguments? ")" ws
+func_call       = name ws "(" ws arguments? ws ")" ws
 arguments       = expr ("," ws expr)*
 
 # Matrix & vector literals

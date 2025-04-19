@@ -5,6 +5,7 @@ from pathlib import Path                    # Helps read files (grammar and inpu
 from AST import *                           # Import AST classes (Block, Let, etc.)
 from typ import *                           # Import type-checking utilities
 import sys                                  # Provides command-line argument support
+import re
 
 # ────────────────────────────────────────────────────────────────────────────
 # Helper functions for expression handling
@@ -78,57 +79,132 @@ class MatrixVisitor(NodeVisitor):
     # ----------------------------------------------------------------
     # Function Definition
     # ----------------------------------------------------------------
-    def visit_func_def(self, node, ch):
-        name = ch[2]  # the identifier after 'def'
-
-        # Harvest every (param_name, param_type) pair
-        param_pairs = []
-
-        def walk(x):
-            if isinstance(x, tuple) and len(x) == 2 and isinstance(x[1], Type):
-                param_pairs.append(x)
-            elif isinstance(x, list):
-                for y in x:
-                    walk(y)
-
-        walk(ch)
-
-        param_names = [n for n, _ in param_pairs]
-        param_types = [t for _, t in param_pairs]
-
-        # Find return type (first MatrixType child, else implicit Mat(0,0))
-        ret_ty = next((c for c in ch if isinstance(c, MatrixType)),
-                      MatrixType((ConcreteDim(0), ConcreteDim(0))))
-
-        # Find body (first Block child)
-        body = next(c for c in ch if isinstance(c, Block))
-
-        return FunctionDec(
-            name,
-            param_names,
-            body,
-            FunctionType(param_types, ret_ty),
-        )
+    def visit_func_def(self, node, visited_children):
+        """Process function definition"""
+        # Get function name (at index 2)
+        name = visited_children[2]
+        
+        # Extract parameters from node text directly
+        func_text = node.text
+        params = []
+        param_types = []
+        
+        # Extract parameter section from the function text
+        param_section_match = re.search(r'\((.*?)\)', func_text)
+        if param_section_match:
+            param_section = param_section_match.group(1).strip()
+            if param_section:
+                # Split parameters by commas
+                param_items = param_section.split(',')
+                for param_item in param_items:
+                    param_item = param_item.strip()
+                    if ':' in param_item:
+                        param_parts = param_item.split(':')
+                        param_name = param_parts[0].strip()
+                        type_text = param_parts[1].strip()
+                        
+                        params.append(param_name)
+                        
+                        # Parse the type
+                        if 'Mat(' in type_text:
+                            dims_match = re.search(r'Mat\((.*?),(.*?)\)', type_text)
+                            if dims_match:
+                                row_dim_text = dims_match.group(1).strip()
+                                col_dim_text = dims_match.group(2).strip()
+                                
+                                # Create dimensions
+                                if row_dim_text.isalpha():
+                                    row_dim = TypeVarDim(row_dim_text)
+                                else:
+                                    try:
+                                        row_dim = ConcreteDim(int(row_dim_text))
+                                    except ValueError:
+                                        row_dim = TypeVarDim('a')
+                                
+                                if col_dim_text.isalpha():
+                                    col_dim = TypeVarDim(col_dim_text)
+                                else:
+                                    try:
+                                        col_dim = ConcreteDim(int(col_dim_text))
+                                    except ValueError:
+                                        col_dim = TypeVarDim('a')
+                                
+                                param_types.append(MatrixType((row_dim, col_dim)))
+                            else:
+                                # Default type if parsing fails
+                                param_types.append(MatrixType((TypeVarDim('a'), TypeVarDim('a'))))
+                        else:
+                            # Default type if not Mat
+                            param_types.append(MatrixType((TypeVarDim('a'), TypeVarDim('a'))))
+        
+        # Find return type (-> Type) after the params
+        ret_type = MatrixType((ConcreteDim(0), ConcreteDim(0)))  # default
+        ret_type_match = re.search(r'->\s*Mat\((.*?),(.*?)\)', func_text)
+        if ret_type_match:
+            row_dim_text = ret_type_match.group(1).strip()
+            col_dim_text = ret_type_match.group(2).strip()
+            
+            # Create dimensions for return type
+            if row_dim_text.isalpha():
+                row_dim = TypeVarDim(row_dim_text)
+            else:
+                try:
+                    row_dim = ConcreteDim(int(row_dim_text))
+                except ValueError:
+                    row_dim = TypeVarDim('a')
+            
+            if col_dim_text.isalpha():
+                col_dim = TypeVarDim(col_dim_text)
+            else:
+                try:
+                    col_dim = ConcreteDim(int(col_dim_text))
+                except ValueError:
+                    col_dim = TypeVarDim('a')
+            
+            ret_type = MatrixType((row_dim, col_dim))
+        
+        # Find function body (after the opening brace)
+        body = Block([])  # default empty body
+        for item in visited_children:
+            if isinstance(item, Block):
+                body = item
+                break
+        
+        return FunctionDec(name, params, body, FunctionType(param_types, ret_type))
 
     # ----------------------------------------------------------------
     # Parameters List:
     # params = param ("," ws param)*  
     # ----------------------------------------------------------------
     def visit_params(self, node, visited_children):
-        param_list = [visited_children[0]]
-        for group in visited_children[1]:
-            param_list.append(group[2])
-        return param_list
+        """Process function parameter list"""
+        result = []
+        
+        # First parameter
+        first_param = visited_children[0]
+        if first_param:
+            result.append(first_param)
+        
+        # Additional parameters (comma-separated)
+        if len(visited_children) > 1 and visited_children[1]:
+            for group in visited_children[1]:
+                if len(group) > 2 and group[2]:
+                    result.append(group[2])
+        
+        return result
 
     # ----------------------------------------------------------------
     # Parameter:
     # param = name ws ":" ws type
     # ----------------------------------------------------------------
     def visit_param(self, node, visited_children):
+        """Process single parameter with type"""
+        # Parameter name is at index 0
         param_name = visited_children[0]
-        if isinstance(param_name, list):  # unpack if needed
-            param_name = param_name[0]
+        
+        # Parameter type is at index 4
         param_type = visited_children[4]
+        
         return (param_name, param_type)
 
     # ----------------------------------------------------------------
@@ -170,23 +246,33 @@ class MatrixVisitor(NodeVisitor):
     # func_body = (statement / comment / emptyline)* return_stmt?
     # ----------------------------------------------------------------
     def visit_func_body(self, node, visited_children):
-        stmts = []
+        """Process function body with statements and optional return statement"""
+        statements = []
+        
+        # Process all regular statements
         for child in visited_children:
-            if isinstance(child, list):
-                for sub in child:
-                    if isinstance(sub, Statement) or hasattr(sub, 'node_type'):
-                        stmts.append(sub)
-            elif isinstance(child, Statement) or hasattr(child, 'node_type'):
-                stmts.append(child)
-        return Block(stmts)
+            if isinstance(child, Statement):
+                statements.append(child)
+            elif isinstance(child, list):
+                for item in child:
+                    if isinstance(item, Statement):
+                        statements.append(item)
+                    elif isinstance(item, list):
+                        for subitem in item:
+                            if isinstance(subitem, Statement):
+                                statements.append(subitem)
+        
+        return Block(statements)
 
     # ----------------------------------------------------------------
     # Return Statement:
     # return_stmt = "return" ws expr ";" ws
     # ----------------------------------------------------------------
     def visit_return_stmt(self, node, visited_children):
-        expr_node = _expr(visited_children[2])
-        return Return(expr_node)
+        """Process a return statement"""
+        # Expression is at index 2
+        expr = _expr(visited_children[2])
+        return Return(expr)
 
     # ----------------------------------------------------------------
     # Addition/Subtraction:
@@ -257,16 +343,27 @@ class MatrixVisitor(NodeVisitor):
     def visit_func_call(self, node, visited_children):
         """Process function call expressions"""
         func_name = visited_children[0]
-    
-        # Check if arguments are present
+        
+        # Extract arguments
         args = []
+        
+        # Arguments are at index 4
         if len(visited_children) > 4 and visited_children[4]:
-            if isinstance(visited_children[4], list):
-                args = visited_children[4]
-    
-        # Make sure each arg is an Expr, not a list
-        args = [_expr(arg) for arg in args]
-    
+            arg_list = visited_children[4]
+            if isinstance(arg_list, list):
+                # Single argument
+                if len(arg_list) == 1:
+                    args.append(_expr(arg_list[0]))
+                # Multiple arguments
+                elif len(arg_list) > 1:
+                    first_arg = _expr(arg_list[0])
+                    args.append(first_arg)
+                    
+                    for arg_group in arg_list[1:]:
+                        if isinstance(arg_group, list) and len(arg_group) > 2:
+                            next_arg = _expr(arg_group[2])
+                            args.append(next_arg)
+        
         return FunctionCall(func_name, args)
 
     # ----------------------------------------------------------------
@@ -277,7 +374,7 @@ class MatrixVisitor(NodeVisitor):
         """Process function call arguments list"""
         first = _expr(visited_children[0])          # the first expression
         rest = [_expr(g[2]) for g in visited_children[1]]  # remaining expressions
-    
+        
         # Return a flat list of expressions, not nested lists
         return [first] + rest
 
@@ -321,10 +418,16 @@ class MatrixVisitor(NodeVisitor):
 # parse() function: Reads a file, parses it using the grammar, and returns an AST.
 # ----------------------------------------------------------------
 def parse(file_name: str):
+    """Parse a MatLang file and return the AST"""
+    # Read the grammar and file
     grammar = Grammar(Path("grammar.peg").read_text())
-    tree = grammar.parse(Path(file_name).read_text())
+    source_text = Path(file_name).read_text()
+    
+    # Parse using the grammar
+    tree = grammar.parse(source_text)
     visitor = MatrixVisitor()
     ast = visitor.visit(tree)
+    
     return ast
 
 # ----------------------------------------------------------------

@@ -199,7 +199,7 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         return _to_matrix(expr.value)
     
     elif isinstance(expr, Variable):
-        if bindings.get(expr.name) is None:
+        if expr.name not in bindings:
             raise Exception(f"Undefined variable: {expr.name}")
         return bindings[expr.name]
     
@@ -244,16 +244,19 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         func_dec = declarations[expr.name]
         arg_values = [interpret_expr(arg, bindings, declarations) for arg in expr.args]
         
-        # Create a fresh scope that has all outer bindings
-        new_bindings = ScopedDict()                 # start clean
-        new_bindings.dicts = [d.copy() for d in bindings.dicts]  # copy outer scopes
-        new_bindings.push_scope()                   # innermost scope for parameters
+        # Check if arguments match parameters count
+        if len(arg_values) != len(func_dec.params):
+            raise Exception(f"Function '{func_dec.name}' expected {len(func_dec.params)} arguments, got {len(arg_values)}")
+        
+        # Create a fresh scope with function parameters
+        new_bindings = ScopedDict()
+        new_bindings.push_scope()
         
         # Bind parameters to argument values
         for param_name, arg_val in zip(func_dec.params, arg_values):
             new_bindings[param_name] = arg_val
         
-        # Interpret the function body
+        # Interpret the function body with the new bindings
         return interpret_block(func_dec.body, new_bindings, declarations)
     
     else:
