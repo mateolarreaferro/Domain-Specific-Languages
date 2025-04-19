@@ -255,12 +255,18 @@ class MatrixVisitor(NodeVisitor):
     # func_call = name ws "(" ws arguments? ")" ws
     # ----------------------------------------------------------------
     def visit_func_call(self, node, visited_children):
+        """Process function call expressions"""
         func_name = visited_children[0]
+    
         # Check if arguments are present
-        if isinstance(visited_children[4], list) and visited_children[4]:
-            args = visited_children[4]
-        else:
-            args = []
+        args = []
+        if len(visited_children) > 4 and visited_children[4]:
+            if isinstance(visited_children[4], list):
+                args = visited_children[4]
+    
+        # Make sure each arg is an Expr, not a list
+        args = [_expr(arg) for arg in args]
+    
         return FunctionCall(func_name, args)
 
     # ----------------------------------------------------------------
@@ -268,12 +274,12 @@ class MatrixVisitor(NodeVisitor):
     # arguments = expr ("," ws expr)*
     # ----------------------------------------------------------------
     def visit_arguments(self, node, visited_children):
-        first = visited_children[0]                 # the first expression
-        rest  = [g[2] for g in visited_children[1]] # remaining expressions
-
-        raw_args = [first] + rest                   # list may contain Expr or [Expr]
-        args = [_first_expr(a) for a in raw_args]   # flatten each entry to a real Expr
-        return args
+        """Process function call arguments list"""
+        first = _expr(visited_children[0])          # the first expression
+        rest = [_expr(g[2]) for g in visited_children[1]]  # remaining expressions
+    
+        # Return a flat list of expressions, not nested lists
+        return [first] + rest
 
     # ----------------------------------------------------------------
     # Matrix Literal:

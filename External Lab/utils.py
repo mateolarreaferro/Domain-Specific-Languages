@@ -47,12 +47,12 @@ class ScopedDict:
             The value associated with the key.
 
         Raises:
-            AssertionError: If the key is not found in any scope.
+            KeyError: If the key is not found in any scope.
         """
         for d in reversed(self.dicts):
-            if d.get(key, None) is not None:
+            if key in d:
                 return d[key]
-        assert False, f"dictionary did not contain key {key}"
+        raise KeyError(f"Key '{key}' not found in any scope")
 
     def __setitem__(self, key, value):
         """Set the value for a key in the current (innermost) scope.
@@ -63,19 +63,34 @@ class ScopedDict:
         """
         self.dicts[-1][key] = value
 
-    def get(self, key):
+    def __contains__(self, key):
+        """Check if the key exists in any scope.
+
+        Args:
+            key: The key to check.
+
+        Returns:
+            True if the key exists in any scope, False otherwise.
+        """
+        for d in reversed(self.dicts):
+            if key in d:
+                return True
+        return False
+
+    def get(self, key, default=None):
         """Retrieve the value associated with the key from the nearest scope.
 
         Args:
             key: The key to look up.
+            default: The default value to return if the key is not found.
 
         Returns:
-            The value associated with the key, or None if the key is not found.
+            The value associated with the key, or the default value if the key is not found.
         """
-        for d in reversed(self.dicts):
-            if d.get(key, None) is not None:
-                return d[key]
-        return None
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
     def push_scope(self):
         """Create a new (inner) scope."""
@@ -87,4 +102,6 @@ class ScopedDict:
         Raises:
             IndexError: If there are no scopes to pop.
         """
+        if len(self.dicts) <= 1:
+            raise IndexError("Cannot pop the last scope")
         self.dicts.pop()
