@@ -1,13 +1,13 @@
 from parsimonious.nodes import NodeVisitor  # Allows walking the parse tree.
 from parsimonious.nodes import Node         # Represents nodes in the parse tree.
-from parsimonious.grammar import Grammar       # Loads and works with the PEG grammar.
-from pathlib import Path                       # Helps read files (grammar and input).
-from AST import *                              # Import AST classes (Block, Let, etc.)
-from typ import *                              # Import type-checking utilities (if needed)
-import sys                                     # Provides command-line argument support
+from parsimonious.grammar import Grammar    # Loads and works with the PEG grammar.
+from pathlib import Path                    # Helps read files (grammar and input).
+from AST import *                           # Import AST classes (Block, Let, etc.)
+from typ import *                           # Import type-checking utilities
+import sys                                  # Provides command-line argument support
 
 # ────────────────────────────────────────────────────────────────────────────
-# Helper: always yield an Expr
+# Helper functions for expression handling
 # ────────────────────────────────────────────────────────────────────────────
 def _expr(item):
     """Return an Expr; wrap bare identifier strings as Variable."""
@@ -17,18 +17,19 @@ def _expr(item):
         return Variable(item)
     if isinstance(item, list) and item:
         return _expr(item[0])
+    if isinstance(item, int):
+        return Literal(item)
     return item
 
-from AST import Expr   # local import to avoid circularity
 def _first_expr(obj):
     """Return the first Expr inside obj, unwrapping one‑element lists."""
     if isinstance(obj, Expr):
         return obj
     if isinstance(obj, list) and obj:
         return _first_expr(obj[0])
+    if isinstance(obj, int):
+        return Literal(obj)
     return obj
-
-
 
 class MatrixVisitor(NodeVisitor):
     """Visitor for the parse tree that converts a MatLang parse tree (as defined in grammar.peg)
@@ -43,19 +44,6 @@ class MatrixVisitor(NodeVisitor):
     def visit_name(self, node, visited_children):
         # strip trailing ws and return plain string
         return node.text.strip()
-    
-    # --- Helper -------------------------------------------------------
-    def _expr(item):
-        """Return the first Expr or transform bare strings → Variable."""
-        if isinstance(item, Expr):
-            return item
-        if isinstance(item, str):        # lone identifier
-            return Variable(item)
-        if isinstance(item, list) and item:
-            return _expr(item[0])
-        return item
-
-
 
     # ----------------------------------------------------------------
     # Program
@@ -73,50 +61,54 @@ class MatrixVisitor(NodeVisitor):
         statements = flatten_statements(visited_children)
         return Block(statements)
 
-
-
     # ----------------------------------------------------------------
     # Let Statement: let_stmt = "let" ws name ws "=" ws expr ";" ws
     # ----------------------------------------------------------------
-    def visit_let_stmt(self, node, visited_children):
-        var_name = visited_children[2]
-        expr_node = visited_children[6]
+    def visit_let_stmt(self, node, ch):
+        var_name = ch[2]
+        expr_node = _expr(ch[6])
         return Let(var_name, expr_node)
-    
-    
 
     # ----------------------------------------------------------------
     # Expression Statement: expr_stmt = expr ";" ws
     # ----------------------------------------------------------------
-    def visit_expr_stmt(self, node, visited_children):
-        expr_node = visited_children[0]
-        return ExpressionStatement(expr_node)
-
+    def visit_expr_stmt(self, node, ch):
+        return ExpressionStatement(_expr(ch[0]))
 
     # ----------------------------------------------------------------
-    # Function Definition:
-    # func_def = "def" ws name ws "(" ws params? ")" ws "->" ws type ws "{" ws func_body "}" ws
+    # Function Definition
     # ----------------------------------------------------------------
     def visit_func_def(self, node, ch):
-        name  = ch[2]
-        raw_params = ch[6]                # [] or param list
-        params = [p for p in raw_params if isinstance(p, tuple)]
-        param_names = [n for n, _ in params]
-        param_types = [t for _, t in params]
+        name = ch[2]  # the identifier after 'def'
 
-        if isinstance(ch[9], str) and ch[9] == '->':   # arrow present
-            ret_ty   = ch[11]
-            body_idx = 15
-        else:                                          # no arrow
-            ret_ty   = MatrixType((ConcreteDim(0), ConcreteDim(0)))  # default Mat(0,0)
-            body_idx = 11
+        # Harvest every (param_name, param_type) pair
+        param_pairs = []
 
-        body = ch[body_idx]
-        return FunctionDec(name, param_names, body,
-                       FunctionType(param_types, ret_ty))
+        def walk(x):
+            if isinstance(x, tuple) and len(x) == 2 and isinstance(x[1], Type):
+                param_pairs.append(x)
+            elif isinstance(x, list):
+                for y in x:
+                    walk(y)
 
+        walk(ch)
 
+        param_names = [n for n, _ in param_pairs]
+        param_types = [t for _, t in param_pairs]
 
+        # Find return type (first MatrixType child, else implicit Mat(0,0))
+        ret_ty = next((c for c in ch if isinstance(c, MatrixType)),
+                      MatrixType((ConcreteDim(0), ConcreteDim(0))))
+
+        # Find body (first Block child)
+        body = next(c for c in ch if isinstance(c, Block))
+
+        return FunctionDec(
+            name,
+            param_names,
+            body,
+            FunctionType(param_types, ret_ty),
+        )
 
     # ----------------------------------------------------------------
     # Parameters List:
@@ -139,10 +131,9 @@ class MatrixVisitor(NodeVisitor):
         param_type = visited_children[4]
         return (param_name, param_type)
 
-
     # ----------------------------------------------------------------
     # Type:
-    # type = "Mat(" ws number ws "," ws number ws ")" ws
+    # type = "Mat(" ws dim ws "," ws dim ws ")" ws
     # ----------------------------------------------------------------
     def visit_type(self, node, visited_children):
         def extract_dim(val):
@@ -157,7 +148,16 @@ class MatrixVisitor(NodeVisitor):
         rows = extract_dim(visited_children[2])
         cols = extract_dim(visited_children[6])
         return MatrixType((rows, cols))
-
+    
+    # ----------------------------------------------------------------
+    # Dim:
+    # dim = name / number
+    # ----------------------------------------------------------------
+    def visit_dim(self, node, visited_children):
+        val = visited_children[0]
+        if isinstance(val, str) and val.isdigit():
+            return int(val)
+        return val
     
     def visit_comment(self, node, visited_children):
         return None
@@ -165,21 +165,19 @@ class MatrixVisitor(NodeVisitor):
     def visit_emptyline(self, node, visited_children):
         return None
 
-
     # ----------------------------------------------------------------
     # Function Body:
-    # func_body = (statement)* return_stmt?
+    # func_body = (statement / comment / emptyline)* return_stmt?
     # ----------------------------------------------------------------
     def visit_func_body(self, node, visited_children):
         stmts = []
         for child in visited_children:
             if isinstance(child, list):
                 for sub in child:
-                    if hasattr(sub, 'node_type') or isinstance(sub, Statement):
+                    if isinstance(sub, Statement) or hasattr(sub, 'node_type'):
                         stmts.append(sub)
-            else:
-                if hasattr(child, 'node_type') or isinstance(child, Statement):
-                    stmts.append(child)
+            elif isinstance(child, Statement) or hasattr(child, 'node_type'):
+                stmts.append(child)
         return Block(stmts)
 
     # ----------------------------------------------------------------
@@ -187,14 +185,8 @@ class MatrixVisitor(NodeVisitor):
     # return_stmt = "return" ws expr ";" ws
     # ----------------------------------------------------------------
     def visit_return_stmt(self, node, visited_children):
-        expr_node = visited_children[2]
+        expr_node = _expr(visited_children[2])
         return Return(expr_node)
-
-    # ----------------------------------------------------------------
-    # Expression
-    # ----------------------------------------------------------------
-    def visit_expr(self, node, visited_children):
-        return visited_children[0]
 
     # ----------------------------------------------------------------
     # Addition/Subtraction:
@@ -211,7 +203,7 @@ class MatrixVisitor(NodeVisitor):
                 op_enum = BinOp.MINUS
             else:
                 raise Exception(f"Unknown operator in add: {op_token}")
-            left = BinaryExpr(left, right, op_enum)
+            left = BinaryExpr(_expr(left), right, op_enum)
         return left
 
     # ----------------------------------------------------------------
@@ -227,7 +219,7 @@ class MatrixVisitor(NodeVisitor):
                 op_enum = BinOp.TIMES
             else:
                 raise Exception(f"Unknown operator in mul: {op_token}")
-            left = BinaryExpr(left, right, op_enum)
+            left = BinaryExpr(_expr(left), right, op_enum)
         return left
 
     # ----------------------------------------------------------------
@@ -242,38 +234,34 @@ class MatrixVisitor(NodeVisitor):
     # var = name
     # ----------------------------------------------------------------
     def visit_var(self, node, visited_children):
-        return Variable(visited_children[0])   # return a Variable Expr, not the string
-
+        return Variable(visited_children[0])
     
     def visit_number(self, node, visited_children):
-    # number is the TOKEN rule ~r"[0-9]+"
-        return Literal(int(node.text))
-
+        # number is the TOKEN rule ~r"[0-9]+"
+        return int(node.text.strip())
 
     # ----------------------------------------------------------------
     # Number Literal:
     # number_literal = number
     # ----------------------------------------------------------------
     def visit_number_literal(self, node, visited_children):
+        num_val = visited_children[0]
+        if isinstance(num_val, int):
+            return Literal(num_val)
         return Literal(int(node.text.strip()))
-
 
     # ----------------------------------------------------------------
     # Function Call:
     # func_call = name ws "(" ws arguments? ")" ws
     # ----------------------------------------------------------------
     def visit_func_call(self, node, visited_children):
-        func_name = visited_children[0]          # already a string via visit_name
-        raw_args  = visited_children[4] if visited_children[4] else []
-        # flatten any stray lists
-        args = []
-        for a in raw_args:
-            if isinstance(a, list):
-                args.extend([x for x in a if isinstance(x, Expr)])
-            else:
-                args.append(a)
+        func_name = visited_children[0]
+        # Check if arguments are present
+        if isinstance(visited_children[4], list) and visited_children[4]:
+            args = visited_children[4]
+        else:
+            args = []
         return FunctionCall(func_name, args)
-
 
     # ----------------------------------------------------------------
     # Arguments:
@@ -292,11 +280,11 @@ class MatrixVisitor(NodeVisitor):
     # matrix = "[" ws vector ("," ws vector)* "]" ws
     # ----------------------------------------------------------------
     def visit_matrix(self, node, visited_children):
-        first_vec   = visited_children[2]
-        rest_vecs   = [g[2] for g in visited_children[3]]
-        vectors     = [first_vec] + rest_vecs
+        first_vec = visited_children[2]
+        rest_vecs = [g[2] for g in visited_children[3]]
+        vectors = [first_vec] + rest_vecs
 
-    # Expect each row to be a VectorLiteral; store its element list
+        # Expect each row to be a VectorLiteral; store its element list
         row_lists = []
         for v in vectors:
             if isinstance(v, VectorLiteral):
@@ -305,30 +293,23 @@ class MatrixVisitor(NodeVisitor):
                 raise Exception(f"Invalid matrix row: {v}")
         return MatrixLiteral(row_lists)
 
-
     # ----------------------------------------------------------------
     # Vector Literal:
     # vector = "[" ws expr ("," ws expr)* "]" ws
     # ----------------------------------------------------------------
     def visit_vector(self, node, visited_children):
-        first_expr = visited_children[2]
-        rest_exprs = [g[2] for g in visited_children[3]]
+        first_expr = _expr(visited_children[2])
+        rest_exprs = [_expr(g[2]) for g in visited_children[3]]
         return VectorLiteral([first_expr] + rest_exprs)
 
-
-
-
-
-    
     # ----------------------------------------------------------------
     # Print Statement:
-    # print_stmt = "print" ws "(" ws expr ws ")" ws ";" ws
+    # print_stmt = "print" ws "(" ws expr ("," ws expr)* ws ")" ws ";" ws
     # ----------------------------------------------------------------
     def visit_print_stmt(self, node, ch):
-        first = ch[4]                     # expr
-        rest  = [g[2] for g in ch[5]]     # , expr …
-        return Print([_expr(first)] + [_expr(r) for r in rest])
-
+        first = _expr(ch[4])
+        rest = [_expr(g[2]) for g in ch[5]]
+        return Print([first] + rest)
 
 # ----------------------------------------------------------------
 # parse() function: Reads a file, parses it using the grammar, and returns an AST.
@@ -339,8 +320,6 @@ def parse(file_name: str):
     visitor = MatrixVisitor()
     ast = visitor.visit(tree)
     return ast
-
-
 
 # ----------------------------------------------------------------
 # Command-Line Entry Point: Allows testing by running "python parse.py [input_file]"

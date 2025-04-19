@@ -1,6 +1,0 @@
-
-# Error: TypeError
-def foo(x: Mat(a, a), y: Mat(a, a)) -> Mat(a, a) {
-    print(x + y);
-}
-

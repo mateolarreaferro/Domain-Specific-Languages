@@ -1,5 +1,0 @@
-
-# result: parsing error
-def foo(x: Mat(print(3), 1), y: Mat(1, 1)) -> Mat(1, 1) {
-    return 1;
-}

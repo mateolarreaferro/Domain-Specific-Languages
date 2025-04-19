@@ -15,15 +15,16 @@ number      = ~r"[0-9]+" ws         # integer literal
 # ─────────────────────────────────────────────────────────────────────────────
 # Comments
 # ─────────────────────────────────────────────────────────────────────────────
-comment     = "#" ~r".*" ws         # ignore everything after ‘#’ to end‑of‑line
+comment     = "#" ~r".*" ws         # ignore everything after '#' to end‑of‑line
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Statements
 # ─────────────────────────────────────────────────────────────────────────────
 statement   = print_stmt
             / let_stmt
-            / expr_stmt
             / func_def
+            / return_stmt
+            / expr_stmt
 
 # Variable binding  ──  let x = expr;
 let_stmt    = "let" ws name ws "=" ws expr ";" ws
@@ -37,7 +38,6 @@ print_stmt  = "print" ws "(" ws expr ("," ws expr)* ws ")" ws ";" ws
 # ─────────────────────────────────────────────────────────────────────────────
 # Function definitions
 # ─────────────────────────────────────────────────────────────────────────────
-# ‘-> ReturnType’ is now optional.
 func_def    = "def" ws name ws "(" ws params? ")" ws ("->" ws type)? ws
               "{" ws func_body "}" ws
 
@@ -50,7 +50,7 @@ dim         = name / number
 
 # Function body can contain statements, comments, or blank lines, plus
 # an optional return at the end.
-func_body   = (statement / comment / emptyline)* return_stmt?
+func_body   = (statement / comment / emptyline)*
 return_stmt = "return" ws expr ";" ws
 
 # ─────────────────────────────────────────────────────────────────────────────
