@@ -228,6 +228,7 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         flat = [int(v) if v.size == 1 else v.item() for v in elems]
         return np.array([flat])
     
+    # Update the function call evaluation in interpret_expr
     elif isinstance(expr, FunctionCall):
         # 1) Handle built-in print function
         if expr.name == "print":
@@ -248,17 +249,16 @@ def interpret_expr(expr: Expr, bindings: ScopedDict, declarations: ScopedDict):
         if len(arg_values) != len(func_dec.params):
             raise Exception(f"Function '{func_dec.name}' expected {len(func_dec.params)} arguments, got {len(arg_values)}")
         
-        # Create a fresh scope with function parameters
-        new_bindings = ScopedDict()
-        new_bindings.push_scope()
+        # Create a new scope for function execution
+        func_bindings = ScopedDict()
+        func_bindings.push_scope()
         
         # Bind parameters to argument values
         for param_name, arg_val in zip(func_dec.params, arg_values):
-            new_bindings[param_name] = arg_val
+            func_bindings[param_name] = arg_val
         
         # Interpret the function body with the new bindings
-        return interpret_block(func_dec.body, new_bindings, declarations)
-    
+        return interpret_block(func_dec.body, func_bindings, declarations)
     else:
         raise Exception(f"Unrecognized expression type: {type(expr)}")
 
@@ -301,10 +301,10 @@ def interpret_stmt(stmt: Statement, bindings: ScopedDict, declarations: ScopedDi
         return np.empty((0, 0)), False  # Mat(0,0)
     
     # 5. expression statement
+    # In interpret_stmt, update the ExpressionStatement case
     if isinstance(stmt, ExpressionStatement):
-        interpret_expr(stmt.expr, bindings, declarations)
-        return np.empty((0, 0)), False
-    
+        val = interpret_expr(stmt.expr, bindings, declarations)
+        return val, False
     # 6. any expression used directly as a statement (rare)
     if isinstance(stmt, Expr):
         interpret_expr(stmt, bindings, declarations)

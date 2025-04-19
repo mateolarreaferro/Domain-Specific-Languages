@@ -81,131 +81,114 @@ class MatrixVisitor(NodeVisitor):
     # ----------------------------------------------------------------
     def visit_func_def(self, node, visited_children):
         """Process function definition"""
-        # Get function name (at index 2)
-        name = visited_children[2]
-        
-        # Extract parameters from node text directly
-        func_text = node.text
-        params = []
-        param_types = []
-        
-        # Extract parameter section from the function text
-        param_section_match = re.search(r'\((.*?)\)', func_text)
-        if param_section_match:
-            param_section = param_section_match.group(1).strip()
-            if param_section:
-                # Split parameters by commas
-                param_items = param_section.split(',')
-                for param_item in param_items:
-                    param_item = param_item.strip()
-                    if ':' in param_item:
-                        param_parts = param_item.split(':')
-                        param_name = param_parts[0].strip()
-                        type_text = param_parts[1].strip()
-                        
-                        params.append(param_name)
-                        
-                        # Parse the type
-                        if 'Mat(' in type_text:
-                            dims_match = re.search(r'Mat\((.*?),(.*?)\)', type_text)
-                            if dims_match:
-                                row_dim_text = dims_match.group(1).strip()
-                                col_dim_text = dims_match.group(2).strip()
-                                
-                                # Create dimensions
-                                if row_dim_text.isalpha():
-                                    row_dim = TypeVarDim(row_dim_text)
-                                else:
-                                    try:
-                                        row_dim = ConcreteDim(int(row_dim_text))
-                                    except ValueError:
-                                        row_dim = TypeVarDim('a')
-                                
-                                if col_dim_text.isalpha():
-                                    col_dim = TypeVarDim(col_dim_text)
-                                else:
-                                    try:
-                                        col_dim = ConcreteDim(int(col_dim_text))
-                                    except ValueError:
-                                        col_dim = TypeVarDim('a')
-                                
-                                param_types.append(MatrixType((row_dim, col_dim)))
-                            else:
-                                # Default type if parsing fails
-                                param_types.append(MatrixType((TypeVarDim('a'), TypeVarDim('a'))))
-                        else:
-                            # Default type if not Mat
-                            param_types.append(MatrixType((TypeVarDim('a'), TypeVarDim('a'))))
-        
-        # Find return type (-> Type) after the params
-        ret_type = MatrixType((ConcreteDim(0), ConcreteDim(0)))  # default
-        ret_type_match = re.search(r'->\s*Mat\((.*?),(.*?)\)', func_text)
-        if ret_type_match:
-            row_dim_text = ret_type_match.group(1).strip()
-            col_dim_text = ret_type_match.group(2).strip()
-            
-            # Create dimensions for return type
-            if row_dim_text.isalpha():
-                row_dim = TypeVarDim(row_dim_text)
-            else:
-                try:
-                    row_dim = ConcreteDim(int(row_dim_text))
-                except ValueError:
-                    row_dim = TypeVarDim('a')
-            
-            if col_dim_text.isalpha():
-                col_dim = TypeVarDim(col_dim_text)
-            else:
-                try:
-                    col_dim = ConcreteDim(int(col_dim_text))
-                except ValueError:
-                    col_dim = TypeVarDim('a')
-            
-            ret_type = MatrixType((row_dim, col_dim))
-        
-        # Find function body (after the opening brace)
-        body = Block([])  # default empty body
-        for item in visited_children:
-            if isinstance(item, Block):
-                body = item
-                break
-        
-        return FunctionDec(name, params, body, FunctionType(param_types, ret_type))
+        # print("\n--- visit_func_def ---") # Optional Debugging
+        # for i, child in enumerate(visited_children):
+        #     print(f"Index {i}: Type={type(child)}, Value={repr(child)}")
+        # print("----------------------\n")
 
+        # Indices (approximate):
+        # "def" ws name ws "(" ws params? ws ")" ws ("->" ws type)? ws "{" ws func_body "}" ws
+        #  0    1   2   3   4   5    6     7   8   9       10        11 12 13     14    15 16
+        func_name = visited_children[2]
+
+        param_info_list = [] # Default: no parameters
+        params_node_result = visited_children[6]
+        if isinstance(params_node_result, list) and len(params_node_result) > 0:
+            potential_params = params_node_result[0]
+            if isinstance(potential_params, list) and all(isinstance(p, tuple) for p in potential_params):
+                param_info_list = potential_params
+
+        param_names = [name for name, type in param_info_list]
+        param_types = [type for name, type in param_info_list]
+
+        # --- Updated Return Type Handling Again ---
+        return_type = MatrixType((ConcreteDim(0), ConcreteDim(0))) # Default: Mat(0,0)
+        return_type_group_result = visited_children[10] # This corresponds to the ("->" ws type)? group
+
+        # Check if the optional group matched. It often returns [['->', ws, type_node]]
+        if isinstance(return_type_group_result, list) and len(return_type_group_result) == 1 and isinstance(return_type_group_result[0], list):
+            # Get the inner list containing the visited children of "->" ws type
+            inner_list = return_type_group_result[0]
+            # print(f"Inner list for return type: {inner_list}") # Optional Debugging
+
+            found_type_node = None
+            # Iterate through the INNER list to find the Type object
+            for item in inner_list:
+                if isinstance(item, Type):
+                    found_type_node = item
+                    break # Found the type node
+
+            if found_type_node:
+                return_type = found_type_node
+            else:
+                raise Exception(f"visit_func_def: Optional return type group's inner list did not contain a Type object: {inner_list}")
+
+        # --- End Updated Return Type Handling ---
+
+        func_body_node = visited_children[14]
+        if isinstance(func_body_node, Block):
+            func_body = func_body_node
+        else:
+            # print(f"Warning: func_body was not a Block node (index 14). Type: {type(func_body_node)}. Assuming empty body.")
+            func_body = Block(stmts=[])
+
+        func_type = FunctionType(params=param_types, ret=return_type)
+
+        return FunctionDec(name=func_name, params=param_names, body=func_body, ty=func_type)
+    
     # ----------------------------------------------------------------
-    # Parameters List:
-    # params = param ("," ws param)*  
-    # ----------------------------------------------------------------
-    def visit_params(self, node, visited_children):
-        """Process function parameter list"""
-        result = []
-        
-        # First parameter
-        first_param = visited_children[0]
-        if first_param:
-            result.append(first_param)
-        
-        # Additional parameters (comma-separated)
-        if len(visited_children) > 1 and visited_children[1]:
-            for group in visited_children[1]:
-                if len(group) > 2 and group[2]:
-                    result.append(group[2])
-        
+# Parameter: param = name ws ":" ws type
+# ----------------------------------------------------------------
+    def visit_param(self, node, visited_children):
+        """Process single parameter with type. Returns (name: str, type: Type)"""
+        # print(f"visit_param children: {visited_children}") # Optional Debugging
+        # Indices based on rule: name[0] ws[1] :[2] ws[3] type[4]
+        param_name = visited_children[0]
+        param_type = visited_children[4]
+
+        # Ensure param_name is a string (result of visit_name)
+        if not isinstance(param_name, str):
+            raise Exception(f"visit_param: Expected string for parameter name, got {type(param_name)}: {param_name}")
+
+        # Ensure param_type is a Type object (result of visit_type)
+        if not isinstance(param_type, Type):
+            # It's possible visit_type failed or returned something unexpected.
+            # Let's check the type node directly in the parse tree for clues.
+            type_node_text = node.children[4].text # Get the text of the type part
+            raise Exception(f"visit_param: Expected Type for parameter type (for '{param_name}'), got {type(param_type)}: {param_type}. Parsed type text was: '{type_node_text}'")
+
+        result = (param_name, param_type)
+        # print(f"visit_param returning: {result}") # Optional Debugging
         return result
 
-    # ----------------------------------------------------------------
-    # Parameter:
-    # param = name ws ":" ws type
-    # ----------------------------------------------------------------
-    def visit_param(self, node, visited_children):
-        """Process single parameter with type"""
-        # Parameter name is at index 0
-        param_name = visited_children[0]
-        
-        # Parameter type is at index 4
-        param_type = visited_children[4]
-        
-        return (param_name, param_type)
+# ----------------------------------------------------------------
+# Parameters List: params = param ("," ws param)*
+# ----------------------------------------------------------------
+    def visit_params(self, node, visited_children):
+        """Process function parameter list. Returns a list of (name, type) tuples."""
+        # print(f"visit_params children: {visited_children}") # Optional Debugging
+        # visited_children structure: [param_result, list_of_groups]
+        # where param_result is from visit_param, and each group is [",", ws, param_result]
+
+        first_param_result = visited_children[0]
+
+        # Validate the first parameter's structure IMMEDIATELY
+        if not (isinstance(first_param_result, tuple) and len(first_param_result) == 2):
+            raise Exception(f"visit_params: Expected tuple for first_param_result, got {type(first_param_result)}: {first_param_result}")
+
+        # Process the rest of the parameters
+        rest_params = []
+        for group in visited_children[1]:
+            param_result = group[2] # Get the param result from the group [",", ws, param_result]
+            # Validate each subsequent parameter's structure
+            if not (isinstance(param_result, tuple) and len(param_result) == 2):
+                raise Exception(f"visit_params: Expected tuple for subsequent param_result, got {type(param_result)}: {param_result}")
+            rest_params.append(param_result)
+
+        # Combine the first parameter and the rest
+        all_params = [first_param_result] + rest_params
+        # print(f"visit_params returning: {all_params}") # Optional Debugging
+        return all_params # List of (name, type) tuples
 
     # ----------------------------------------------------------------
     # Type:
