@@ -41,9 +41,8 @@ class Sound:
         """Create a scratch mp3 file wrapped as a Sound."""
         return Sound(NamedTemporaryFile(suffix=".mp3"))
 
-    # ──────────────────────────────────────────────────────────────────
+
     # Convenience
-    # ──────────────────────────────────────────────────────────────────
     def play(self):
         """Play this sound (blocking)."""
         sub.run(
@@ -52,9 +51,8 @@ class Sound:
             check=True,
         )
 
-    # ──────────────────────────────────────────────────────────────────
+
     # Operator overloading
-    # ──────────────────────────────────────────────────────────────────
     def __or__(self, other: Self) -> Self:
         """Sequence two sounds (self followed by other)."""
         out = self._temp_mp3()
