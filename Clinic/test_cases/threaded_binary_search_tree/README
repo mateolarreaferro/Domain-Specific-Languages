@@ -1,0 +1,21 @@
++-------------------------------------------------+
+| THREADED BINARY SEARCH TREE (.tbst) FILE FORMAT |
++-------------------------------------------------+
+Every file in the .tbst format can be broken up into _nodes_. Every node is 24
+bytes in total and looks like:
+
+    1. A 4-byte integer key.
+    2. A 4-byte integer value.
+    3. A 4-byte "next" pointer.
+    4. A 4-byte "prev" pointer.
+    5. A 4-byte "left" pointer.
+    6. A 4-byte "right" pointer.
+
+The format encodes a threaded binary tree:
+https://en.wikipedia.org/wiki/Threaded_binary_tree
+
+Note the "pointer"s are byte indexes into the file where the corresponding node
+starts.
+
+In addition to the nodes, the .tbst file also has a 4-byte pointer at byte 0
+that points to the first node.  A 0 pointer indicates pointing to NULL.
