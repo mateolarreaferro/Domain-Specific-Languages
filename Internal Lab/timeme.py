@@ -10,4 +10,4 @@ def timeme(label: str):
         yield
     finally:
         elapsed = time() - start
-        print(f"{label} took {elapsed:.3f} s")
+        print(f"{label} took {elapsed*1_000_000:.0f} µs")
