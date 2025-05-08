@@ -1,12 +1,12 @@
-# SonicBin – Binary → MIDI Sonification DSL
+# SonicBin – Binary → MIDI Sonification DSL
 
 > **Turn raw bytes into music.**
 >
-> SonicBin ships a tiny DSL (Python + CLI) that ingests three binary formats — **FSF**, **LLF**, **TBST** — and emits a Standard MIDI File.  One flag or a few lines of code is all it takes.
+> SonicBin ships a tiny DSL (Python + CLI) that ingests three binary formats — **FSF**, **LLF**, **TBST** — and emits a Standard MIDI File. One flag or a few lines of code is all it takes.
 
 ---
 
-## 1  Installation & Requirements
+## 1 Installation & Requirements
 
 ```bash
 python3 -m venv .venv       # optional but recommended
@@ -16,20 +16,20 @@ pip install mido            # single dependency
 
 ---
 
-## 2  Quick Starts (CLI Syntax Variants)
+## 2 Quick Starts (CLI Syntax Variants)
 
-| Syntax                    | Purpose                                               | Example                                                                          |
-| ------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
-| **Minimal**               | Use defaults, write `<input>.mid`.                    | `python sonicbin.py tests/one_small_file.llf`                                    |
-| **Explicit output**       | Name the `.mid` yourself.                             | `python sonicbin.py tests/one_small_file.llf out/demo.mid`                       |
-| **Custom tempo**          | BPM in integer.                                       | `python sonicbin.py tests/test_encryption.fsf --tempo 90`                        |
-| **Custom PPQ**            | Ticks‑per‑quarter (resolution).                       | `python sonicbin.py tests/two_nodes.tbst --ticks 240`                            |
-| **Single‑track (type‑0)** | Collapses all voices into one track, channels intact. | `python sonicbin.py tests/one_small_file.llf --merge`                            |
-| **All options at once**   | Full control.                                         | `python sonicbin.py tests/test_encryption.fsf demo.mid -t 140 -ppq 1920 --merge` |
+| Syntax | Purpose | Example |
+|--------|---------|---------|
+| **Minimal** | Use defaults, write `<input>.mid`. | `python sonicbin.py tests/one_small_file.llf` |
+| **Explicit output** | Name the `.mid` yourself. | `python sonicbin.py tests/one_small_file.llf out/demo.mid` |
+| **Custom tempo** | BPM in integer. | `python sonicbin.py tests/test_encryption.fsf --tempo 90` |
+| **Custom PPQ** | Ticks‑per‑quarter (resolution). | `python sonicbin.py tests/two_nodes.tbst --ticks 240` |
+| **Single‑track (type‑0)** | Collapses all voices into one track, channels intact. | `python sonicbin.py tests/one_small_file.llf --merge` |
+| **All options at once** | Full control. | `python sonicbin.py tests/test_encryption.fsf demo.mid -t 140 -ppq 1920 --merge` |
 
 ---
 
-## 3  Demo Runner (`run.py`)
+## 3 Demo Runner (`run.py`)
 
 Saves three illustrative MIDIs to **`output/`** and showcases every DSL feature:
 
@@ -39,15 +39,15 @@ python run.py
 
 Under the hood it executes:
 
-1. **LLF**  → default mapping, merged track.
-2. **FSF** → slower tempo, coarse PPQ, merged track.
-3. **TBST** → two independent `ByteMapping`s (bass + lead) for counterpoint.
+1. **LLF** → default mapping, merged track.  
+2. **FSF** → slower tempo, coarse PPQ, merged track.  
+3. **TBST** → two independent `ByteMapping`s (bass + lead) for counterpoint.
 
-Open the resulting files in any DAW to see channels 1‑5 co‑habiting a single track.
+Open the resulting files in any DAW to see channels 1‑5 co‑habiting a single track.
 
 ---
 
-## 4  Python API Cheatsheet
+## 4 Python API Cheatsheet
 
 ```python
 from sonicbin import Sonifier, default_mapping
@@ -58,7 +58,7 @@ Sonifier("binary.fsf", merge_tracks=True) \
     .write_midi("binary.mid")
 ```
 
-### 4.1  Custom Mapping Example
+### 4.1 Custom Mapping Example
 
 ```python
 from sonicbin import ByteMapping, popcount, slice_filter, Sonifier
@@ -90,19 +90,19 @@ Sonifier("tests/two_nodes.tbst", tempo_bpm=140, merge_tracks=True) \
 
 ---
 
-## 5  Format Parsers At a Glance
+## 5 Format Parsers At a Glance
 
-| Suffix  | Spec summary                                                 | Parser function |
-| ------- | ------------------------------------------------------------ | --------------- |
-| `.fsf`  | 32‑byte fixed: payload length (1) + payload (≤30) + key (1). | `_parse_fsf`    |
-| `.llf`  | Linked‑list of small files; clusters = 256 B.                | `_parse_llf`    |
-| `.tbst` | Threaded binary search tree (24 B nodes).                    | `_parse_tbst`   |
+| Suffix | Spec summary | Parser function |
+|--------|--------------|-----------------|
+| `.fsf` | 32‑byte fixed: payload length (1) + payload (≤30) + key (1). | `_parse_fsf` |
+| `.llf` | Linked‑list of small files; clusters = 256 B. | `_parse_llf` |
+| `.tbst` | Threaded binary search tree (24 B nodes). | `_parse_tbst` |
 
 All other extensions fall back to **raw‑byte** mode.
 
 ---
 
-## 6  Testing & CI Guidance
+## 6 Testing & CI Guidance
 
 Add this to `pytest.ini` if you want automatic smoke‑tests in CI:
 
@@ -125,12 +125,12 @@ assert Path("output/one_small_file.mid").stat().st_size > 0
 
 ---
 
-## 7  Contributing
+## 7 Contributing
 
-PRs for new binary parsers, mappings, or DAW export tips are welcome.  Open an issue first if unsure.
+PRs for new binary parsers, mappings, or DAW export tips are welcome. Open an issue first if unsure.
 
 ---
 
-## 8  License
+## 8 License
 
-MIT – see `LICENSE` for details.
+MIT – see `LICENSE` for details.
