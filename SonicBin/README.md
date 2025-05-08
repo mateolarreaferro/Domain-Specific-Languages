@@ -1,5 +1,8 @@
 # SonicBin – Binary → MIDI Sonification DSL
 
+## 0 Demo
+🎧 [**Demo** on Vimeo](https://vimeo.com/1082456060?share=copy)
+
 > **Turn raw bytes into music.**
 >
 > SonicBin ships a tiny DSL (Python + CLI) that ingests three binary formats — **FSF**, **LLF**, **TBST** — and emits a Standard MIDI File. One flag or a few lines of code is all it takes.
@@ -131,6 +134,3 @@ PRs for new binary parsers, mappings, or DAW export tips are welcome. Open an is
 
 ---
 
-## 8 License
-
-MIT – see `LICENSE` for details.
