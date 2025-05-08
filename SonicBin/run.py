@@ -27,6 +27,7 @@ def main() -> None:
     llf = TESTS / "one_small_file.llf"
     Sonifier(
         llf,
+        tempo_bpm=500,
         merge_tracks=True,
     ).add_mapping(default_mapping()).write_midi(
         OUTDIR / f"{llf.stem}.mid"
