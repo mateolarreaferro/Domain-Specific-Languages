@@ -1,189 +1,136 @@
-+------------------------------------------+
-| CS 343S CLINIC: WORKING WITH BINARY DATA |
-+------------------------------------------+
-In this clinic, you'll design and implement a DSL for visualizing and/or
-modifying binary data formats.
+# SonicBin – Binary → MIDI Sonification DSL
 
-Recall that the clinic is supposed to be a shorter timeframe than your project,
-and slightly more guided. We'll give you the domain and a few examples of what
-you might want your DSL to be able to do. You need to design + implement the
-DSL.
+> **Turn raw bytes into music.**
+>
+> SonicBin ships a tiny DSL (Python + CLI) that ingests three binary formats — **FSF**, **LLF**, **TBST** — and emits a Standard MIDI File.  One flag or a few lines of code is all it takes.
 
-==============
-= BACKGROUND =
-==============
-Most of the time, when we use computers, we're thinking in terms of high-level
-objects: PDF documents, web pages, MP3 songs, text files, etc.
+---
 
-But under the hood, all of this data is stored in really big binary numbers.
+## 1  Installation & Requirements
 
-For example, you're probably reading this file using a program that displays it
-on your screen as a bunch of recognizable characters. But under the hood, it
-looks like this (use xxd -d README to see for yourself):
+```bash
+python3 -m venv .venv       # optional but recommended
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install mido            # single dependency
+```
 
-    001010110010110100101101 ...
+---
 
-Your editor reads these bits, chunks them up into groups of 8, and interprets
-them according to the ASCII encoding. These chunk into
+## 2  Quick Starts (CLI Syntax Variants)
 
-    00101011 00101101 00101101 ...
+| Syntax                    | Purpose                                               | Example                                                                          |
+| ------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **Minimal**               | Use defaults, write `<input>.mid`.                    | `python sonicbin.py tests/one_small_file.llf`                                    |
+| **Explicit output**       | Name the `.mid` yourself.                             | `python sonicbin.py tests/one_small_file.llf out/demo.mid`                       |
+| **Custom tempo**          | BPM in integer.                                       | `python sonicbin.py tests/test_encryption.fsf --tempo 90`                        |
+| **Custom PPQ**            | Ticks‑per‑quarter (resolution).                       | `python sonicbin.py tests/two_nodes.tbst --ticks 240`                            |
+| **Single‑track (type‑0)** | Collapses all voices into one track, channels intact. | `python sonicbin.py tests/one_small_file.llf --merge`                            |
+| **All options at once**   | Full control.                                         | `python sonicbin.py tests/test_encryption.fsf demo.mid -t 140 -ppq 1920 --merge` |
 
-And the ASCII table tells us that 00101011 should represent '+' while 00101101
-represents '-', so what you actually see starts with "+--"
+---
 
-ASCII files are relatively simple, but binary data can get much more
-complicated.
+## 3  Demo Runner (`run.py`)
 
-In the ASCII format, we just assumed every byte in the file was an ASCII
-character that should be shown to the user. But in some cases you might want to
-store a bunch of different lists of data. One more complicated pattern is to
-store a list of items by first storing how many items there are, then storing
-those items, then you can store other data after that. For example, the Git
-index file format (https://git-scm.com/docs/index-format) starts off with a
-header stating how many files are in the commit, then listing them, then other
-data about the repository can be stored afterwards. A simplified version of
-this would look something like:
+Saves three illustrative MIDIs to **`output/`** and showcases every DSL feature:
 
-    00000010 -> There are 2 files in the repository
-    00000001 -> The first one has size 1
-    00000100 -> The second one has size 4
-    10100010 -> (Some other information, say, the date of the commit)
-    11100110 -> (Some other information, say, a hash of the commit contents)
+```bash
+python run.py
+```
 
-Another common pattern is to use _linked lists_, such as in the FAT file system
-https://en.wikipedia.org/wiki/File_Allocation_Table. The idea here is to allow
-the contents of a list to be scattered around the file, rather than all in one
-chunk. This makes it easier to extend lists, because you can just put the new
-item at the end and update the pointer to it. Such a file might look like:
+Under the hood it executes:
 
-    Byte Offset in File  | Byte        | Description
-    --------------------------------------------------------------------------
-    0                    | 00000010    | The first file's info is at byte 2
-    1                    | 00000001    | The first repository metadata info is
-                         |             | at byte 4
+1. **LLF**  → default mapping, merged track.
+2. **FSF** → slower tempo, coarse PPQ, merged track.
+3. **TBST** → two independent `ByteMapping`s (bass + lead) for counterpoint.
 
-    2                    | 00000001    | The first file has size 1
-    3                    | 00000110    | The next file's info is at byte 6
+Open the resulting files in any DAW to see channels 1‑5 co‑habiting a single track.
 
-    4                    | 10100010    | Date of the commit
-    5                    | 00001000    | The next metadata info is at byte 8
+---
 
-    6                    | 00000100    | The second file has size 4
-    7                    | 00000000    | No more files
+## 4  Python API Cheatsheet
 
-    8                    | 11100110    | Hash of the commit contents
-    9                    | 00000000    | No more metadata
+```python
+from sonicbin import Sonifier, default_mapping
 
-While these examples have focused on on-disk file formats, binary formats also
-come up a bunch when debugging programs, because the state of memory is itself
-just binary!
+# one‑liner: defaults + write MIDI
+Sonifier("binary.fsf", merge_tracks=True) \
+    .add_mapping(default_mapping())          \
+    .write_midi("binary.mid")
+```
 
-=============
-= YOUR TASK =
-=============
-The goal of this clinic is to write a language for representing and working
-with binary file formats. "Working with" here is a little bit up to you: I
-suggest giving your language user the ability to visualize and/or modify binary
-files meeting that format.
+### 4.1  Custom Mapping Example
 
-You should complete your DSL in two phases. First, plan your DSL by answering
-the following questions:
+```python
+from sonicbin import ByteMapping, popcount, slice_filter, Sonifier
 
-    1. Who is the imagined user of your DSL?
-    2. What can your users do with your DSL? (What are the verbs?)
-    3. What are the primitives (nouns)?
+# Map even bytes to a bass, odds to a lead line
+bass = ByteMapping(
+    "bass",
+    pitch=lambda b: 36 + (b & 0x1F),        # C2–B3
+    velocity=lambda b: 50 + popcount(b),
+    duration_ticks=lambda b: 240,
+    channel=lambda i, _b: 1,
+    byte_filter=slice_filter(slice(None, None, 2)),  # even indices
+)
 
-Then, after implementing your DSL, answer the following reflection questions:
+lead = ByteMapping(
+    "lead",
+    pitch=lambda b: 60 + (b % 12),          # C4–B4
+    velocity=lambda _b: 80,
+    duration_ticks=lambda b: 120 + (b & 0x0F) * 10,
+    channel=lambda idx: (idx // 8) % 4 + 2,          # rotates channels 2‑5
+    byte_filter=slice_filter(slice(1, None, 2)),     # odd indices
+)
 
-    4. What did you learn, about language design or this specific domain?
-    5. Was anything more challenging, or less clean, than you expected?
-    6. In retrospect, what would you want to say to someone trying to build a
-    DSL for a similar purpose?
+Sonifier("tests/two_nodes.tbst", tempo_bpm=140, merge_tracks=True) \
+    .add_mapping(bass) \
+    .add_mapping(lead) \
+    .write_midi("output/counterpoint.mid")
+```
 
-Please turn in to Gradescope:
+---
 
-    A) A .zip file containing your DSL implementation
+## 5  Format Parsers At a Glance
 
-    B) Documentation and examples explaining how to use it, at least for the
-    "minimum requirements/test cases" examples below (including 2 formats you
-    add to our test cases), and 
+| Suffix  | Spec summary                                                 | Parser function |
+| ------- | ------------------------------------------------------------ | --------------- |
+| `.fsf`  | 32‑byte fixed: payload length (1) + payload (≤30) + key (1). | `_parse_fsf`    |
+| `.llf`  | Linked‑list of small files; clusters = 256 B.                | `_parse_llf`    |
+| `.tbst` | Threaded binary search tree (24 B nodes).                    | `_parse_tbst`   |
 
-    C) A text file answering questions 1--6 above.
+All other extensions fall back to **raw‑byte** mode.
 
-================================
-= EXPECTED STRUCTURE/INTERFACE =
-================================
-While you can deviate from it, the basic structure of your project should look
-something like this:
+---
 
-    1. The user writes a program, like "mp3_format.fmt", that describes a
-    specific binary format (in this case, mp3).
+## 6  Testing & CI Guidance
 
-    2. The user then provides your DSL interpreter two things: the format
-    program, and an actual binary file in that format. Your DSL then does
-    something with this (e.g., visualize the file)
+Add this to `pytest.ini` if you want automatic smoke‑tests in CI:
 
-        $ my_binary_visualizer mp3_format.fmt song1.mp3
-            Song name: "CS 343S!!"
-            Number of Samples: 32
-            ...
+```ini
+[pytest]
+addopts = -q
+```
 
-You are welcome to deviate from this structure/interface, especially if you do
-something like generation or modification rather than just visualization. But
-we're providing it here to minimize confusion.
+Then a minimal test in `tests/test_midis.py`:
 
-WARNING: in particular, the goal of your DSL is *NOT* to just work with a
-single, specific file. Instead, it's to express an entire file _format_. Your
-user should be able to:
+```python
+from pathlib import Path
+import mido
 
-    A) Use one program in your DSL (like "mp3_format.fmt") to open + work with
-    multiple different actual files in that format (like "song1.mp3").
+mid = mido.MidiFile("output/one_small_file.mid")
+assert mid.type in (0, 1)
+assert any(msg.type == "note_on" for track in mid.tracks for msg in track)
+assert Path("output/one_small_file.mid").stat().st_size > 0
+```
 
-    B) Write multiple different format files, so your DSL can be used to
-    visualize different types of files.
+---
 
-===================================
-= MINIMUM REQUIREMENTS/TEST CASES =
-===================================
-You should provide examples of 3 different binary formats your tool can handle.
+## 7  Contributing
 
-At least 2 of them must be chosen from the test_cases/ folder, which contains
-three different file formats that your DSL should be able to handle. Each file
-format has a README describing it and contains a few different test files in
-that format.
+PRs for new binary parsers, mappings, or DAW export tips are welcome.  Open an issue first if unsure.
 
-Each binary format your tool can handle should come with at least 2 examples of
-binary files your tool can generate, read, etc. (whatever your tool does).
+---
 
-=====================
-= HINTS/SUGGESTIONS =
-=====================
-The helpers.py file contains some starter code showing how to interact with
-binary files in Python. You might find it helpful!
+## 8  License
 
-Some things to think about:
-
-    - What do you want to allow your user to do? Visualize binary files?
-      Generate them? Modify them? Etc.
-
-    - Will you have just one language, or multiple (like Penrose)?
-
-    - Will your DSL be external, or internal?
-
-If you want to do a language for visualization, you might try looking into
-GraphViz, Tkinter, or ncurses. Alternatively, you could do an ASCII-art
-visualization.
-
-====================
-= GRADING CRITERIA =
-====================
-The main objective criteria is: did you come up with a reasonably interesting
-language that can express at least the three file formats in test_cases/, along
-with your additional format?
-
-As long as you do that, your grade will be fine (probably an A).
-
-This lab does have a very high ceiling, though, and we're not afraid to give
-extra credit for students that go above and beyond. Especially if you're able
-to do nontrivial things with real file formats (think MP3, TAR, GZIP, etc.)
-and/or your DSL is really expressive.
+MIT – see `LICENSE` for details.

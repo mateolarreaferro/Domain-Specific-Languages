@@ -1,9 +1,0 @@
-+------------------------------------------+
-| THE FIXED-SIZE FIELDS (.fsf) FILE FORMAT |
-+------------------------------------------+
-Every file in the FSF format has size exactly 32 bytes:
-
-    - The first byte is the length of the payload.
-    - The next 30 bytes contain the payload.
-    - The final byte is the decryption key: every byte in the payload should
-      have this value subtracted to get the original ASCII text.
