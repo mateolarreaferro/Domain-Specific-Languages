@@ -1,8 +1,11 @@
 loop "forrest-l.wav":
-  volume   = 0.4
-  pitch = 0.5
+  volume   = 0.2
+  pitch = 0.1
 
-oneshot "1.mp3" every 0.1..0.2:
-  volume   = 0.1..0.3
-  pitch = 0.1..2
-  fade_out = 0.5
+oneshot "3.mp3" every 1..10:
+    volume = 0.1..0.02
+    pitch = 0.01..0.5
+
+oneshot "2.mp3" every 0.01..0.1:
+    volume = 0.1..0.05
+    pitch = -1..-0.1
