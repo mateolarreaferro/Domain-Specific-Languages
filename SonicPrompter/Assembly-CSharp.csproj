@@ -49,6 +49,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Assets/Scripts/SonicPrompterRuntime.cs" />
+    <Compile Include="Assets/Scripts/SonicPrompterParser.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets/test.sp.txt" />

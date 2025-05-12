@@ -1,5 +1,8 @@
-loop "conocidos.wav":
-    volume = 0.1
+loop "forrest-l.wav":
+  volume   = 0.4
+  pitch = 0.5
 
-loop "tokyo.mp3":
-    volume = 0.2
+oneshot "1.mp3" every 0.1..0.2:
+  volume   = 0.1..0.3
+  pitch = 0.1..2
+  fade_out = 0.5

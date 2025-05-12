@@ -1,123 +1,120 @@
+using System.Collections;
 using System.Collections.Generic;
-using System.IO;
-using System.Text.RegularExpressions;
 using UnityEngine;
+using SonicPrompter; 
 
 public class SonicPrompterRuntime : MonoBehaviour
 {
     [Tooltip("Text asset containing .sp code")]
     [SerializeField] private TextAsset scriptFile;
 
-    // clip name  →  AudioSource
-    private readonly Dictionary<string, AudioSource> activeSources = new();
-
-    private static readonly Regex LoopStmt =
-        new(
-            @"loop\s+""(?<clip>.+?)""\s*:\s*(?:\r?\n\s*volume\s*=\s*(?<vol>\d*\.?\d+))?",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase
-        );
+    private readonly List<AudioSource> spawned = new();
+    private readonly List<Coroutine>   schedulers = new();
 
     private void Start()
     {
-        if (scriptFile == null)
-        {
-            Debug.LogError("No SonicPrompter script assigned!");
-            return;
-        }
-
-        ParseAndSync(scriptFile.text, fullReset: true);
-    }
-
-    /// <summary>
-    /// Syncs AudioSources to the DSL.  If fullReset=true, stops everything first.
-    /// </summary>
-    private void ParseAndSync(string code, bool fullReset)
-    {
-        if (fullReset) StopAll();
-
-        // 1. Parse DSL → collect desired set
-        var desired = new Dictionary<string, float>(); // clip → volume
-        foreach (Match m in LoopStmt.Matches(code))
-        {
-            string clip  = m.Groups["clip"].Value.Trim();
-            float  vol   = float.TryParse(m.Groups["vol"].Value, out var v) ? v : 1f;
-            desired[clip] = vol;                       // last one wins if duplicate
-        }
-
-        // 2. Update & spawn
-        foreach (var kv in desired)
-        {
-            string clipName = kv.Key;
-            float  vol      = kv.Value;
-
-            if (activeSources.TryGetValue(clipName, out var src))
-            {
-                // already playing → just update parameters
-                src.volume = vol;
-            }
-            else
-            {
-                // new loop → load & play
-                string clipPath = $"Audio/{Path.GetFileNameWithoutExtension(clipName)}";
-                AudioClip clip  = Resources.Load<AudioClip>(clipPath);
-                if (clip == null)
-                {
-                    Debug.LogWarning($"Clip '{clipName}' not found in Resources/Audio");
-                    continue;
-                }
-
-                var go  = new GameObject($"[SP] {clipName}");
-                src     = go.AddComponent<AudioSource>();
-                src.clip         = clip;
-                src.loop         = true;
-                src.volume       = vol;
-                src.spatialBlend = 0f;
-                src.Play();
-
-                activeSources[clipName] = src;
-                Debug.Log($"[SP] Started '{clipName}' vol={vol}");
-            }
-        }
-
-        // 3. Stop & clean up anything no longer in the DSL
-        var toRemove = new List<string>();
-        foreach (var pair in activeSources)
-            if (!desired.ContainsKey(pair.Key))
-            {
-                pair.Value.Stop();
-                Destroy(pair.Value.gameObject);        // tidy up hierarchy
-                toRemove.Add(pair.Key);
-                Debug.Log($"[SP] Stopped '{pair.Key}' (removed from script)");
-            }
-        foreach (var key in toRemove) activeSources.Remove(key);
-    }
-
-    public void StopAll()
-    {
-        foreach (var src in activeSources.Values)
-        {
-            if (src) src.Stop();
-            if (src) Destroy(src.gameObject);
-        }
-        activeSources.Clear();
+        if (!scriptFile) { Debug.LogError("No .sp file assigned."); return; }
+        Sync(fullReset: true);
     }
 
 #if UNITY_EDITOR
     private void Update()
     {
-        // R → incremental sync (add / update / remove)
-        if (Input.GetKeyDown(KeyCode.R) && !Input.GetKey(KeyCode.LeftShift))
-        {
-            ParseAndSync(scriptFile.text, fullReset: false);
-            Debug.Log("[SonicPrompter] Incremental sync.");
-        }
-
-        // Shift + R → full reset
-        if (Input.GetKeyDown(KeyCode.R) && Input.GetKey(KeyCode.LeftShift))
-        {
-            ParseAndSync(scriptFile.text, fullReset: true);
-            Debug.Log("[SonicPrompter] Full reset.");
-        }
+        if (Input.GetKeyDown(KeyCode.R) && !Input.GetKey(KeyCode.LeftShift)) Sync(false);
+        if (Input.GetKeyDown(KeyCode.R) &&  Input.GetKey(KeyCode.LeftShift)) Sync(true);
     }
 #endif
+
+    // ───────────────── sync & scheduling ─────────────────
+    private void Sync(bool fullReset)
+    {
+        if (fullReset) HardReset();
+
+        var stmts = SonicPrompterParser.Parse(scriptFile.text);
+        foreach (var s in stmts) schedulers.Add(StartCoroutine(RunStmt(s)));
+
+        Debug.Log($"[SP] Synced ({(fullReset ? "full" : "delta")}).");
+    }
+
+    private IEnumerator RunStmt(Statement s)
+    {
+        yield return new WaitForSeconds(s.starts_at.Sample());
+
+        if (s.kind == "loop")
+            yield return StartCoroutine(HandleLoop(s));
+        else
+            yield return StartCoroutine(HandleOneShot(s));
+    }
+
+    private IEnumerator HandleLoop(Statement s)
+    {
+        AudioSource src = SpawnSource(s);
+        if (!src) yield break;
+
+        if (s.duration.isSet)
+            yield return StopAfter(src, s.duration.Sample(), s.fade_out);
+    }
+
+    private IEnumerator HandleOneShot(Statement s)
+    {
+        while (true)
+        {
+            AudioSource src = SpawnSource(s);
+            if (!src) yield break;
+
+            float wait = src.clip.length + s.fade_out + s.every.Sample();
+            yield return new WaitForSeconds(wait);
+        }
+    }
+
+    // ─────────── AudioSource helpers ───────────
+    private AudioSource SpawnSource(Statement s)
+    {
+        var clip = Resources.Load<AudioClip>(SonicPrompterParser.PathFor(s.clip));
+        if (!clip) { Debug.LogWarning($"Clip '{s.clip}' not found."); return null; }
+
+        var go  = new GameObject($"[SP] {s.clip}");
+        go.transform.SetParent(transform);
+        var src = go.AddComponent<AudioSource>();
+        spawned.Add(src);
+
+        src.clip   = clip;
+        src.loop   = (s.kind == "loop");
+        src.volume = 0f;
+        src.pitch  = s.pitch.Sample();
+        src.Play();
+
+        StartCoroutine(Fade(src, 0f, s.volume.Sample(), s.fade_in));
+        return src;
+    }
+
+    private IEnumerator StopAfter(AudioSource src, float secs, float fadeOut)
+    {
+        yield return new WaitForSeconds(secs - fadeOut);
+        yield return Fade(src, src.volume, 0f, fadeOut);
+        if (src) src.Stop();
+    }
+
+    private static IEnumerator Fade(AudioSource src, float from, float to, float dur)
+    {
+        if (dur <= 0f) { if (src) src.volume = to; yield break; }
+        float t = 0;
+        while (t < dur && src)
+        {
+            src.volume = Mathf.Lerp(from, to, t / dur);
+            t += Time.deltaTime;
+            yield return null;
+        }
+        if (src) src.volume = to;
+    }
+
+    private void HardReset()
+    {
+        foreach (var co in schedulers) if (co != null) StopCoroutine(co);
+        schedulers.Clear();
+
+        foreach (var src in spawned)
+            if (src) Destroy(src.gameObject);
+        spawned.Clear();
+    }
 }
