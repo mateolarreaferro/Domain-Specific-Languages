@@ -1,2 +1,5 @@
+loop "conocidos.wav":
+    volume = 0.1
+
 loop "tokyo.mp3":
-    volume = 1
+    volume = 0.2
