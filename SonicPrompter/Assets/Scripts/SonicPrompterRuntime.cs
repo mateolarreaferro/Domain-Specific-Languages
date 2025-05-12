@@ -8,7 +8,8 @@ public class SonicPrompterRuntime : MonoBehaviour
     [Tooltip("Text asset containing .sp code")]
     [SerializeField] private TextAsset scriptFile;
 
-    private readonly List<AudioSource> activeSources = new();
+    // clip name  →  AudioSource
+    private readonly Dictionary<string, AudioSource> activeSources = new();
 
     private static readonly Regex LoopStmt =
         new(
@@ -24,17 +25,30 @@ public class SonicPrompterRuntime : MonoBehaviour
             return;
         }
 
-        ParseAndLaunch(scriptFile.text);
+        ParseAndLaunch(scriptFile.text, fullReset: true);
     }
 
-    private void ParseAndLaunch(string code)
+    /// <summary>
+    /// Parses DSL and spawns/updates AudioSources.
+    /// If fullReset is true, stops everything first.
+    /// </summary>
+    private void ParseAndLaunch(string code, bool fullReset)
     {
+        if (fullReset) StopAll();
+
         foreach (Match m in LoopStmt.Matches(code))
         {
-            string clipName = m.Groups["clip"].Value;
-            if (!float.TryParse(m.Groups["vol"].Value, out float volume))
-                volume = 1f;
+            string clipName = m.Groups["clip"].Value.Trim();
+            float  volume   = float.TryParse(m.Groups["vol"].Value, out var v) ? v : 1f;
 
+            // Already playing?
+            if (activeSources.TryGetValue(clipName, out var existing))
+            {
+                existing.volume = volume;               // just update param
+                continue;                               // don’t restart clip
+            }
+
+            // New loop → load clip + create source
             string clipPath = $"Audio/{Path.GetFileNameWithoutExtension(clipName)}";
             AudioClip clip  = Resources.Load<AudioClip>(clipPath);
             if (clip == null)
@@ -52,24 +66,32 @@ public class SonicPrompterRuntime : MonoBehaviour
             src.spatialBlend = 0f; // 2D
             src.Play();
 
-            activeSources.Add(src);
+            activeSources[clipName] = src;
+            Debug.Log($"[SP] Started '{clipName}' vol={volume}");
         }
     }
 
     public void StopAll()
     {
-        foreach (var src in activeSources) src.Stop();
+        foreach (var src in activeSources.Values) src.Stop();
         activeSources.Clear();
     }
 
 #if UNITY_EDITOR
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.R))
+        // R  → incremental reload (add / tweak, but don't stop others)
+        if (Input.GetKeyDown(KeyCode.R) && !Input.GetKey(KeyCode.LeftShift))
         {
-            StopAll();
-            ParseAndLaunch(scriptFile.text);
-            Debug.Log("[SonicPrompter] Script reloaded.");
+            ParseAndLaunch(scriptFile.text, fullReset: false);
+            Debug.Log("[SonicPrompter] Incremental reload.");
+        }
+
+        // Shift + R  → full reset & reload (old behaviour)
+        if (Input.GetKeyDown(KeyCode.R) && Input.GetKey(KeyCode.LeftShift))
+        {
+            ParseAndLaunch(scriptFile.text, fullReset: true);
+            Debug.Log("[SonicPrompter] Full reset + reload.");
         }
     }
 #endif
