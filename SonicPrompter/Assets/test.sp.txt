@@ -1,11 +1,14 @@
 loop "forrest-l.wav":
-  volume   = 0.2
+  volume   = 0.1
   pitch = 0.1
 
-oneshot "3.mp3" every 1..10:
-    volume = 0.1..0.02
-    pitch = 0.01..0.5
 
-oneshot "2.mp3" every 0.01..0.1:
-    volume = 0.1..0.05
-    pitch = -1..-0.1
+oneshot "1.mp3" every 11..15:
+    volume = 0.1..0.5
+    pitch = 0.01..0.5
+    overlap = true
+
+oneshot "3.mp3" every 0.11..2:
+    volume = 0.1..0.5
+    pitch = 0.1..0.5
+    overlap = true

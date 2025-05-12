@@ -8,15 +8,16 @@ namespace SonicPrompter
     /// <summary>Holds one loop / oneshot statement plus parsed parameters.</summary>
     public sealed class Statement
     {
-        public string kind;                  // "loop" | "oneshot"
+        public string kind; // "loop" | "oneshot"
         public string clip;
-        public RangeOrValue starts_at  = RangeOrValue.Zero;
-        public RangeOrValue duration   = RangeOrValue.Null; // loop-only
-        public RangeOrValue every      = RangeOrValue.Zero; // oneshot
-        public RangeOrValue volume     = new(1f);
-        public RangeOrValue pitch      = new(1f);
-        public float fade_in           = 0f;
-        public float fade_out          = 0f;
+        public RangeOrValue starts_at = RangeOrValue.Zero;
+        public RangeOrValue duration = RangeOrValue.Null; // loop-only
+        public RangeOrValue every = RangeOrValue.Zero; // oneshot
+        public RangeOrValue volume = new(1f);
+        public RangeOrValue pitch = new(1f);
+        public bool overlap = false; 
+        public float fade_in = 0f;
+        public float fade_out = 0f;
     }
 
     /// <summary>Either a single value or a min..max range.</summary>
@@ -84,22 +85,22 @@ namespace SonicPrompter
 
                     switch (k)
                     {
-                        case "volume":    s.volume     = RangeOrValue.Parse(v); break;
-                        case "pitch":     s.pitch      = RangeOrValue.Parse(v); break;
-                        case "starts_at": s.starts_at  = RangeOrValue.Parse(v); break;
-                        case "duration":  s.duration   = RangeOrValue.Parse(v); break;
-                        case "fade_in":   s.fade_in    = float.Parse(v); break;
-                        case "fade_out":  s.fade_out   = float.Parse(v); break;
+                        case "volume": s.volume = RangeOrValue.Parse(v); break;
+                        case "pitch": s.pitch = RangeOrValue.Parse(v); break;
+                        case "starts_at": s.starts_at = RangeOrValue.Parse(v); break;
+                        case "duration": s.duration = RangeOrValue.Parse(v); break;
+                        case "fade_in": s.fade_in = float.Parse(v); break;
+                        case "fade_out": s.fade_out = float.Parse(v); break;
+                        case "overlap": s.overlap = v.ToLower().StartsWith("t"); break;
                     }
                 }
-
                 list.Add(s);
             }
 
             return list;
         }
 
-        /// <summary>Utility: clip path inside Resources/Audio/ (no extension).</summary>
+        /// <summary>Utility: clip path inside Resources/Audio/(no extension).</summary>
         public static string PathFor(string clip)
             => $"Audio/{Path.GetFileNameWithoutExtension(clip)}";
     }

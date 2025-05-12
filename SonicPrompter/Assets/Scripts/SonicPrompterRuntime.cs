@@ -7,7 +7,6 @@ public class SonicPrompterRuntime : MonoBehaviour
 {
     [Tooltip("Text asset containing .sp code")]
     [SerializeField] private TextAsset scriptFile;
-
     private readonly List<AudioSource> spawned = new();
     private readonly List<Coroutine>   schedulers = new();
 
@@ -25,7 +24,7 @@ public class SonicPrompterRuntime : MonoBehaviour
     }
 #endif
 
-    // ───────────────── sync & scheduling ─────────────────
+    // sync & scheduling
     private void Sync(bool fullReset)
     {
         if (fullReset) HardReset();
@@ -40,10 +39,8 @@ public class SonicPrompterRuntime : MonoBehaviour
     {
         yield return new WaitForSeconds(s.starts_at.Sample());
 
-        if (s.kind == "loop")
-            yield return StartCoroutine(HandleLoop(s));
-        else
-            yield return StartCoroutine(HandleOneShot(s));
+        if (s.kind == "loop") yield return StartCoroutine(HandleLoop(s));
+        else yield return StartCoroutine(HandleOneShot(s));
     }
 
     private IEnumerator HandleLoop(Statement s)
@@ -55,19 +52,28 @@ public class SonicPrompterRuntime : MonoBehaviour
             yield return StopAfter(src, s.duration.Sample(), s.fade_out);
     }
 
-    private IEnumerator HandleOneShot(Statement s)
-    {
+   private IEnumerator HandleOneShot(Statement s)
+   {
+        var localSources = new List<AudioSource>();
         while (true)
         {
             AudioSource src = SpawnSource(s);
             if (!src) yield break;
 
-            float wait = src.clip.length + s.fade_out + s.every.Sample();
+            localSources.Add(src);
+
+            float wait = s.overlap
+                ? s.every.Sample() 
+                : src.clip.length + s.fade_out + s.every.Sample();
+
+            localSources.RemoveAll(a => !a);
+
             yield return new WaitForSeconds(wait);
         }
     }
 
-    // ─────────── AudioSource helpers ───────────
+
+    // AudioSource Helpers
     private AudioSource SpawnSource(Statement s)
     {
         var clip = Resources.Load<AudioClip>(SonicPrompterParser.PathFor(s.clip));
@@ -78,10 +84,10 @@ public class SonicPrompterRuntime : MonoBehaviour
         var src = go.AddComponent<AudioSource>();
         spawned.Add(src);
 
-        src.clip   = clip;
-        src.loop   = (s.kind == "loop");
+        src.clip = clip;
+        src.loop = (s.kind == "loop");
         src.volume = 0f;
-        src.pitch  = s.pitch.Sample();
+        src.pitch = s.pitch.Sample();
         src.Play();
 
         StartCoroutine(Fade(src, 0f, s.volume.Sample(), s.fade_in));
