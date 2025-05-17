@@ -1,110 +1,207 @@
+//  ┌─────────────────────────────────────────────────────┐
+//  │ SonicPrompterRuntime.cs                            │
+//  │ -- drives playback inside Unity at runtime.        │
+//  │    • parses the .sp TextAsset                       │
+//  │    • schedules loops / one-shots                    │
+//  │    • spawns AudioSources, movers, debug trails      │
+//  └─────────────────────────────────────────────────────┘
+
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using SonicPrompter; 
+using SonicPrompter;
 
 public class SonicPrompterRuntime : MonoBehaviour
 {
-    [Tooltip("Text asset containing .sp code")]
+    [Tooltip(".sp script (TextAsset)")]
     [SerializeField] private TextAsset scriptFile;
-    private readonly List<AudioSource> spawned = new();
+
+    // keep references so we can clean up on hot-reload / quit
+    private readonly List<AudioSource> spawned  = new();
     private readonly List<Coroutine>   schedulers = new();
 
-    private void Start()
+    // ----------------------------------------------------
+    // life-cycle
+    // ----------------------------------------------------
+    void Start()
     {
-        if (!scriptFile) { Debug.LogError("No .sp file assigned."); return; }
+        if (!scriptFile)
+        {
+            Debug.LogError("SonicPrompterRuntime: TextAsset missing.");
+            return;
+        }
         Sync(fullReset: true);
     }
 
 #if UNITY_EDITOR
-    private void Update()
+    // quick hot-reload while devving in Play-mode
+    void Update()
     {
         if (Input.GetKeyDown(KeyCode.R) && !Input.GetKey(KeyCode.LeftShift)) Sync(false);
         if (Input.GetKeyDown(KeyCode.R) &&  Input.GetKey(KeyCode.LeftShift)) Sync(true);
     }
 #endif
 
-    // sync & scheduling
-    private void Sync(bool fullReset)
+    // ----------------------------------------------------
+    // core sync – parse file, spin up coroutines
+    // ----------------------------------------------------
+    void Sync(bool fullReset)
     {
         if (fullReset) HardReset();
 
-        var stmts = SonicPrompterParser.Parse(scriptFile.text);
-        foreach (var s in stmts) schedulers.Add(StartCoroutine(RunStmt(s)));
+        foreach (var stmt in SonicPrompterParser.Parse(scriptFile.text))
+            schedulers.Add(StartCoroutine(RunStmt(stmt)));
 
         Debug.Log($"[SP] Synced ({(fullReset ? "full" : "delta")}).");
     }
 
-    private IEnumerator RunStmt(Statement s)
+    // waits optional delay then forwards to proper handler
+    IEnumerator RunStmt(Statement s)
     {
         yield return new WaitForSeconds(s.starts_at.Sample());
-
-        if (s.kind == "loop") yield return StartCoroutine(HandleLoop(s));
-        else yield return StartCoroutine(HandleOneShot(s));
+        if (s.kind == "loop")  yield return HandleLoop(s);
+        else                   yield return HandleOneShot(s);
     }
 
-    private IEnumerator HandleLoop(Statement s)
+    // ----------------------------------------------------
+    // loop support – optional timed stop
+    // ----------------------------------------------------
+    IEnumerator HandleLoop(Statement s)
     {
-        AudioSource src = SpawnSource(s);
+        var src = SpawnSource(s);
         if (!src) yield break;
 
         if (s.duration.isSet)
             yield return StopAfter(src, s.duration.Sample(), s.fade_out);
     }
 
-   private IEnumerator HandleOneShot(Statement s)
-   {
-        var localSources = new List<AudioSource>();
+    // ----------------------------------------------------
+    // one-shot support
+    //   • overlap  true  → new AudioSource each hit
+    //   • overlap false → reuse one persistent AudioSource
+    // ----------------------------------------------------
+    IEnumerator HandleOneShot(Statement s)
+    {
+        AudioSource persistent = null;
+
         while (true)
         {
-            AudioSource src = SpawnSource(s);
-            if (!src) yield break;
+            if (s.overlap)
+            {
+                var src = SpawnSource(s);          // throw-away source
+                if (!src) yield break;
+            }
+            else
+            {
+                // first time: create the source + mover + trail
+                if (persistent == null)
+                {
+                    persistent = SpawnSource(s);
+                    if (!persistent) yield break;
+                }
 
-            localSources.Add(src);
+                // tweak dynamic params and retrigger
+                persistent.pitch = s.pitch.Sample();
+                float targetVol  = s.volume.Sample();
 
-            float wait = s.overlap
-                ? s.every.Sample() 
-                : src.clip.length + s.fade_out + s.every.Sample();
+                StartCoroutine(Fade(persistent, 0f, targetVol, s.fade_in));
 
-            localSources.RemoveAll(a => !a);
+                // restart clip from beginning
+                persistent.time = 0f;
+                persistent.Play();
 
-            yield return new WaitForSeconds(wait);
+                // schedule fade-out tail if requested
+                if (s.fade_out > 0f)
+                    StartCoroutine(StopAfter(persistent,
+                                             persistent.clip.length,
+                                             s.fade_out));
+            }
+
+            // wait programmed delay then trigger again
+            yield return new WaitForSeconds(s.every.Sample());
         }
     }
 
-
-    // AudioSource Helpers
-    private AudioSource SpawnSource(Statement s)
+    // ----------------------------------------------------
+    // AudioSource factory – adds mover / fixed pos / trail
+    // ----------------------------------------------------
+    AudioSource SpawnSource(Statement s)
     {
         var clip = Resources.Load<AudioClip>(SonicPrompterParser.PathFor(s.clip));
-        if (!clip) { Debug.LogWarning($"Clip '{s.clip}' not found."); return null; }
+        if (!clip) { Debug.LogWarning($"Clip '{s.clip}' missing."); return null; }
 
-        var go  = new GameObject($"[SP] {s.clip}");
+        var go = new GameObject($"[SP] {s.clip}");
         go.transform.SetParent(transform);
+
         var src = go.AddComponent<AudioSource>();
         spawned.Add(src);
 
-        src.clip = clip;
-        src.loop = (s.kind == "loop");
-        src.volume = 0f;
-        src.pitch = s.pitch.Sample();
+        src.clip         = clip;
+        src.loop         = (s.kind == "loop");
+        src.volume       = 0f;                     // fade-in handles loudness
+        src.pitch        = s.pitch.Sample();
+        src.spatialBlend = (s.wanderType == Statement.WanderType.None) ? 0f : 1f;
         src.Play();
+
+        // movement
+        if (s.wanderType == Statement.WanderType.Walk ||
+            s.wanderType == Statement.WanderType.Fly)
+        {
+            var mover = go.AddComponent<SPSpatial>();
+            mover.type   = s.wanderType;
+            mover.minPos = s.areaMin;
+            mover.maxPos = s.areaMax;
+            mover.hz     = s.wanderHz;
+        }
+        else if (s.wanderType == Statement.WanderType.Fixed)
+        {
+            Vector3 p = new Vector3(
+                Random.Range(s.areaMin.x, s.areaMax.x),
+                Random.Range(s.areaMin.y, s.areaMax.y),
+                Random.Range(s.areaMin.z, s.areaMax.z));
+            go.transform.position = p;
+        }
+
+        // debug trail if designer asked for it
+        if (s.visualize) AddTrail(go);
 
         StartCoroutine(Fade(src, 0f, s.volume.Sample(), s.fade_in));
         return src;
     }
 
-    private IEnumerator StopAfter(AudioSource src, float secs, float fadeOut)
+    // simple white trail with random colour gradient
+    void AddTrail(GameObject go)
+    {
+        var tr = go.AddComponent<TrailRenderer>();
+        tr.widthMultiplier = 0.1f;
+        tr.time            = 5f;
+        tr.material        = new Material(Shader.Find("Sprites/Default"));
+        tr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+
+        Color start = new Color(Random.value, Random.value, Random.value, 1f);
+        Color end   = new Color(start.r, start.g, start.b, 0f);
+
+        var grad = new Gradient();
+        grad.SetKeys(
+            new[] { new GradientColorKey(start, 0f), new GradientColorKey(end, 1f) },
+            new[] { new GradientAlphaKey(1f, 0f),    new GradientAlphaKey(0f, 1f) }
+        );
+        tr.colorGradient = grad;
+    }
+
+    // schedule fade-out + stop
+    IEnumerator StopAfter(AudioSource src, float secs, float fadeOut)
     {
         yield return new WaitForSeconds(secs - fadeOut);
         yield return Fade(src, src.volume, 0f, fadeOut);
         if (src) src.Stop();
     }
 
-    private static IEnumerator Fade(AudioSource src, float from, float to, float dur)
+    // generic volume fade
+    IEnumerator Fade(AudioSource src, float from, float to, float dur)
     {
         if (dur <= 0f) { if (src) src.volume = to; yield break; }
-        float t = 0;
+        float t = 0f;
         while (t < dur && src)
         {
             src.volume = Mathf.Lerp(from, to, t / dur);
@@ -114,9 +211,11 @@ public class SonicPrompterRuntime : MonoBehaviour
         if (src) src.volume = to;
     }
 
-    private void HardReset()
+    // nuke everything (hot-reload / OnDisable)
+    void HardReset()
     {
-        foreach (var co in schedulers) if (co != null) StopCoroutine(co);
+        foreach (var co in schedulers)
+            if (co != null) StopCoroutine(co);
         schedulers.Clear();
 
         foreach (var src in spawned)
